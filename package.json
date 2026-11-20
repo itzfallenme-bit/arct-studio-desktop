@@ -39,7 +39,7 @@
     "@nuclearplayer/i18n": "workspace:*",
     "@nuclearplayer/tailwind-config": "workspace:*",
     "@nuclearplayer/ui": "workspace:*",
-    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "lucide-react": "^0.542.0",
     "luxon": "^3.7.1",
