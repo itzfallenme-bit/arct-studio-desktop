@@ -77,7 +77,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache bundled tools
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: public/tools
           key: arct-tools-${{ runner.os }}-${{ hashFiles('tools/**/package.json', 'tools/**/src/**', 'tools/**/public/**', 'tools/_shared/**', 'scripts/build-tools.mjs', 'scripts/finalize-tools.mjs') }}
