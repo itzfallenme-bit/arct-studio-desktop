@@ -1,0 +1,269 @@
+// An open audio file in the Waveform editor: undoable sample/marker state plus
+// non-undoable view state (zoom, scroll, selection, playhead).
+
+import { Emitter } from '../lib/emitter.js';
+import { History } from '../lib/history.js';
+import { Channel } from '../audio/channel.js';
+import { lengthOf } from './edits.js';
+import { markerOptions, markersOnlyChange } from './markers.js';
+
+let nextId = 1;
+
+/**
+ * Keeps an amplitude scroll offset inside full scale: the lane edges never pass +-1
+ * (no scrolling at all when zoomed out to full scale or beyond).
+ */
+export function clampAmpOffset(offset, amp) {
+  const max = Math.max(0, 1 - 1 / amp);
+  return Math.max(-max, Math.min(max, offset || 0)) || 0;
+}
+
+export class AudioFile extends Emitter {
+  savedStateKnown = true;
+  /**
+   * @param {object} o
+   * @param {string} o.name file name shown in the Files panel and editor tab
+   * @param {number} o.sampleRate
+   * @param {Channel[]} o.channels
+   * @param {object} [o.info] { bitDepth, format, size } from the source file
+   * @param {object} [o.source] where it was opened from: { type: 'puter'|'local'|'new', path, handle }
+   */
+  constructor({ name, sampleRate, channels, markers = [], info = {}, source = { type: 'new' }, meta = {}, origin = null }) {
+    super();
+    this.id = `f${nextId++}`;
+    this.kind = 'audio';
+    this.name = name;
+    this.info = { bitDepth: 32, format: 'wav', ...info };
+    this.source = source;
+    /** The session a mixdown or bounce was rendered from: { sessionId, name, path }. */
+    this.origin = origin;
+    this.history = new History({ sampleRate, channels, markers, meta });
+    this.savedState = this.history.state;
+    let shown = this.history.state;
+    let shownIndex = this.history.index;
+    this.history.on('change', () => {
+      // Undo or redo across a sample rate conversion keeps the view and playhead at the
+      // same times; the conversion itself (an apply) sets them.
+      const prev = shown;
+      const prevIndex = shownIndex;
+      shown = this.state;
+      shownIndex = this.history.index;
+      if (!this.#applying && prev.sampleRate !== shown.sampleRate) this.#rescale(this.#rateScale(prev, prevIndex));
+      this.#syncBitDepth();
+      this.clampView();
+      this.emit('change', { kind: 'history' });
+    });
+    const len = lengthOf(this.state);
+    this.view = { start: 0, end: Math.max(len, sampleRate), amp: 1, freqZoom: 1 };
+    this.selection = { start: 0, end: 0, channels: channels.map(() => true) };
+    this.cursor = 0;
+    /** Noise print captured from a noise-only selection, for Noise Reduction. */
+    this.noisePrint = null;
+    /** Model of a sound learned from an example of it, for Sound Remover. */
+    this.soundModel = null;
+  }
+
+  static blank({ name = 'Untitled', sampleRate = 48000, channels = 2, seconds = 0 } = {}) {
+    const frames = Math.round(seconds * sampleRate);
+    return new AudioFile({
+      name,
+      sampleRate,
+      channels: Array.from({ length: channels }, () => Channel.silence(frames)),
+      info: { bitDepth: 32, format: 'wav' },
+    });
+  }
+
+  get state() {
+    return this.history.state;
+  }
+
+  get sampleRate() {
+    return this.state.sampleRate;
+  }
+
+  get channelCount() {
+    return this.state.channels.length;
+  }
+
+  get length() {
+    return lengthOf(this.state);
+  }
+
+  get duration() {
+    return this.length / this.sampleRate;
+  }
+
+  get dirty() {
+    return !this.savedStateKnown || this.state !== this.savedState;
+  }
+
+  get hasSelection() {
+    return this.selection.end > this.selection.start;
+  }
+
+  /** The masked channel list for edits: null when every channel is selected. */
+  get channelMask() {
+    const m = this.selection.channels;
+    return m.every(Boolean) ? null : m;
+  }
+
+  /** Marks `state` (by default the current one) as what the file holds. */
+  markSaved(state = this.state) {
+    this.savedStateKnown = true;
+    this.savedState = state;
+    this.emit('change', { kind: 'saved' });
+  }
+
+  /** A completed upload may have replaced this file through an unresolved alias. */
+  invalidateSaved() {
+    this.savedStateKnown = false;
+    this.emit('change', { kind: 'saved' });
+  }
+
+  #applying = false;
+
+  /**
+   * How frames scale from `prev` (shown at history entry `prevIndex`) to the current state:
+   * each step between them that changed the sample rate scales by its change in length (a
+   * conversion resamples; Interpret Sample Rate keeps the frames). Steps that only edit
+   * (a crop after the conversion, when the History panel jumps back past both) do not scale.
+   */
+  #rateScale(prev, prevIndex) {
+    const { entries, index } = this.history;
+    if (entries[prevIndex]?.state !== prev) return lengthOf(this.state) / lengthOf(prev);
+    const lo = Math.min(prevIndex, index);
+    const hi = Math.max(prevIndex, index);
+    let k = 1;
+    for (let i = lo; i < hi; i++) {
+      const a = entries[i].state;
+      const b = entries[i + 1].state;
+      if (a.sampleRate !== b.sampleRate) k *= lengthOf(b) / lengthOf(a);
+    }
+    return index < prevIndex ? 1 / k : k;
+  }
+
+  /** Scales the view, playhead and selection by `k` (frames at a new sample rate). */
+  #rescale(k) {
+    if (!(k > 0) || !Number.isFinite(k) || k === 1) return;
+    this.view = { ...this.view, start: this.view.start * k, end: this.view.end * k };
+    this.cursor = Math.round(this.cursor * k);
+    this.selection = { ...this.selection, start: Math.round(this.selection.start * k), end: Math.round(this.selection.end * k) };
+  }
+
+  /** Commits a new state as one undo step. */
+  apply(label, state, { selection, cursor } = {}) {
+    if (state === this.state) return false;
+    if (state.bitDepth !== undefined && this.state.bitDepth === undefined) this.baseBitDepth ??= this.info.bitDepth;
+    this.#applying = true;
+    try {
+      if (!markerOptions.undo && markersOnlyChange(this.state, state)) this.history.outside(state, (s) => ({ ...s, markers: state.markers }));
+      else this.history.push(label, state);
+    } finally {
+      this.#applying = false;
+    }
+    this.#syncBitDepth();
+    if (selection) this.setSelection(selection.start, selection.end, { silent: true });
+    if (cursor !== undefined) this.setCursor(cursor, { silent: true });
+    this.clampView();
+    this.emit('change', { kind: 'edit', label });
+    return true;
+  }
+
+  /**
+   * Convert Sample Type records the new bit depth in the state (state.bitDepth)
+   * so undo and redo restore it; states without one use the depth the file had
+   * before its first conversion.
+   */
+  #syncBitDepth() {
+    if (this.state.bitDepth !== undefined) this.info.bitDepth = this.state.bitDepth;
+    else if (this.baseBitDepth !== undefined) this.info.bitDepth = this.baseBitDepth;
+  }
+
+  /**
+   * Clears the undo history. Audio kept from processed ranges (a crop of a processed file)
+   * then gets buffers of its own, so the rest of those ranges can be freed.
+   */
+  clearHistory() {
+    const saved = this.state === this.savedState;
+    const state = this.state;
+    const channels = state.channels.map((c) => c.compact());
+    this.history.clear();
+    if (channels.every((c, i) => c === state.channels[i])) return;
+    this.history.amend({ ...state, channels });
+    if (saved) this.savedState = this.state;
+  }
+
+  rename(name) {
+    this.name = name;
+    this.emit('change', { kind: 'rename' });
+  }
+
+  setSelection(start, end, { channels, silent } = {}) {
+    const len = this.length;
+    let a = Math.max(0, Math.min(len, Math.round(Math.min(start, end))));
+    let b = Math.max(0, Math.min(len, Math.round(Math.max(start, end))));
+    this.selection = { start: a, end: b, channels: channels ?? this.selection.channels.slice(0, this.channelCount) };
+    while (this.selection.channels.length < this.channelCount) this.selection.channels.push(true);
+    // Undo to fewer channels can drop every enabled one (a stereo file with only Right enabled
+    // undone to mono); edits would then change nothing, so every channel is enabled again.
+    if (!this.selection.channels.some(Boolean)) this.selection.channels.fill(true);
+    if (!silent) this.emit('change', { kind: 'selection' });
+  }
+
+  setChannelEnabled(index, on) {
+    const channels = this.selection.channels.slice();
+    channels[index] = on;
+    if (!channels.some(Boolean)) return;
+    this.selection = { ...this.selection, channels };
+    this.emit('change', { kind: 'selection' });
+  }
+
+  setCursor(frame, { silent } = {}) {
+    this.cursor = Math.max(0, Math.min(this.length, Math.round(frame)));
+    if (!silent) this.emit('change', { kind: 'cursor' });
+  }
+
+  /** View is [start, end) in frames; it may extend past the end of the file. */
+  setView(start, end, { silent } = {}) {
+    const min = 16;
+    const len = Math.max(this.length, 1);
+    let span = Math.max(min, end - start);
+    span = Math.min(span, Math.max(len, this.sampleRate) * 1.0);
+    start = Math.max(0, Math.min(start, Math.max(0, len - span)));
+    this.view = { ...this.view, start, end: start + span };
+    if (!silent) this.emit('change', { kind: 'view' });
+  }
+
+  /**
+   * Amplitude zoom. With `anchor` (a sample value), that value stays at the same height
+   * on screen, as when zooming around the pointer; otherwise the centre value stays put.
+   */
+  setAmp(amp, { anchor } = {}) {
+    const prev = this.view.amp || 1;
+    const next = Math.max(0.05, Math.min(1000, amp));
+    const off = this.view.ampOffset || 0;
+    const at = anchor ?? off;
+    this.view = { ...this.view, amp: next, ampOffset: clampAmpOffset(at - ((at - off) * prev) / next, next) };
+    this.emit('change', { kind: 'view' });
+  }
+
+  /** Vertical scroll while zoomed in on amplitude: the sample value at the lane centre. */
+  setAmpOffset(offset) {
+    const ampOffset = clampAmpOffset(offset, this.view.amp || 1);
+    if (ampOffset === (this.view.ampOffset || 0)) return;
+    this.view = { ...this.view, ampOffset };
+    this.emit('change', { kind: 'view' });
+  }
+
+  clampView() {
+    this.setView(this.view.start, this.view.end, { silent: true });
+    this.setSelection(this.selection.start, this.selection.end, { silent: true });
+    this.cursor = Math.min(this.cursor, this.length);
+  }
+
+  /** The time range edits apply to: the selection or, without one, the whole file. */
+  editRange() {
+    if (this.hasSelection) return [this.selection.start, this.selection.end];
+    return [0, this.length];
+  }
+}

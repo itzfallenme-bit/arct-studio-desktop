@@ -1,3 +1,5 @@
+* text=auto eol=lf
+
 *.png binary
 *.jpg binary
 *.jpeg binary
@@ -5,5 +7,9 @@
 *.icns binary
 *.gif binary
 *.webp binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+*.pdf binary
+*.zip binary
 *.svg text
-packages/player/src-tauri/fixtures/ytdlp_verify/real/** binary

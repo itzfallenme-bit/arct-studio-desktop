@@ -706,5 +706,86 @@
       "plugin": "Plugin",
       "docs": "Docs"
     }
+  },
+  "studio": {
+    "brand": {
+      "name": "Arct Studio",
+      "tagline": "Every tool. One studio.",
+      "maker": "Arct Development"
+    },
+    "titleBar": {
+      "title": "Arct Studio",
+      "minimize": "Minimize",
+      "maximize": "Maximize",
+      "close": "Close"
+    },
+    "navigation": {
+      "home": "Home",
+      "apps": "Apps",
+      "categories": "Workspaces",
+      "settings": "Settings"
+    },
+    "home": {
+      "greetingMorning": "Good morning.",
+      "greetingAfternoon": "Good afternoon.",
+      "greetingEvening": "Good evening.",
+      "subtitle": "Every Arct tool, together in one desktop studio.",
+      "searchLabel": "Search apps",
+      "searchPlaceholder": "Search apps",
+      "recent": "Jump back in",
+      "appsCount_one": "{{count}} app",
+      "appsCount_other": "{{count}} apps",
+      "noResults": "No apps found",
+      "noResultsDescription": "Nothing matches \"{{query}}\". Try another name.",
+      "clearSearch": "Clear search"
+    },
+    "categories": {
+      "all": "All",
+      "create": "Create",
+      "work": "Work",
+      "communicate": "Connect",
+      "build": "Build",
+      "play": "Play",
+      "createDescription": "Write, design, record and edit.",
+      "workDescription": "Run the business: money, people, projects and records.",
+      "communicateDescription": "Mail, chat, meetings and everything on your calendar.",
+      "buildDescription": "Draft, model and engineer in two and three dimensions.",
+      "playDescription": "Take a break with a classic game."
+    },
+    "workspace": {
+      "back": "Back to apps",
+      "reload": "Reload app",
+      "openInBrowser": "Open in browser",
+      "loading": "Loading {{name}}…",
+      "hint": "This app runs inside Arct Studio. If it stays blank, open it in your browser.",
+      "unavailableTitle": "Not published yet",
+      "unavailableDescription": "This app has no hosted build yet. It is still part of the Arct catalog."
+    },
+    "settings": {
+      "title": "Settings",
+      "appearance": "Appearance",
+      "appearanceDescription": "Choose how Arct Studio looks.",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "ai": "Free AI",
+      "aiDescription": "Add your Google AI API key to power writing, image and assistant features inside Arct tools. The key stays on this device.",
+      "aiApiKey": "Google AI API key",
+      "aiPlaceholder": "Paste your API key",
+      "aiShow": "Show",
+      "aiHide": "Hide",
+      "aiStored": "Key saved on this device",
+      "aiGetKey": "Get a Google AI key",
+      "opening": "Opening apps",
+      "openingDescription": "Choose where Arct tools open when you pick them.",
+      "openInStudio": "Inside the studio",
+      "openInBrowser": "In your browser",
+      "recent": "Recent apps",
+      "recentDescription": "Clear the apps on your home screen.",
+      "clearRecent": "Clear recent apps",
+      "about": "About",
+      "aboutDescription": "Arct Studio brings every Arct tool together in one desktop app.",
+      "source": "Arct Development on GitHub",
+      "version": "Version {{version}}"
+    }
   }
 }

@@ -1,0 +1,201 @@
+// Text Editor and Python Console operators used by scripts and keymaps.
+import { test, expect, type Page } from '@playwright/test';
+import { openApp, expectNoErrors } from './helpers';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const run = (page: Page, op: string, props: Record<string, unknown> = {}) =>
+  page.evaluate(([o, p]) => {
+    const a = (window as any).app;
+    return a.run(o, p, { area: a.hoverArea });
+  }, [op, props] as const);
+const body = (page: Page) => page.evaluate(() => Object.values((window as any).app.doc.texts as Record<string, { body: string }>)[0].body);
+const sel = (page: Page) => page.evaluate(() => { const t = document.querySelector('.te-input') as HTMLTextAreaElement; return [t.selectionStart, t.selectionEnd]; });
+
+async function scripting(page: Page, editor: string) {
+  await page.locator('.ws-tab', { hasText: 'Scripting' }).first().click();
+  const el = page.locator(`.area[data-editor="${editor}"]`);
+  const box = (await el.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  return el;
+}
+
+test('Text Editor: insert, delete, line break, indent or autocomplete, set selection, replace set selected', async ({ page }) => {
+  const errors = await openApp(page);
+  const te = await scripting(page, 'TEXT');
+  await run(page, 'text.new');
+  await page.waitForTimeout(100);
+  await run(page, 'text.insert', { text: 'def f():' });
+  await run(page, 'text.line_break');
+  await run(page, 'text.insert', { text: 'return alpha beta' });
+  // the block opener indents the new line
+  expect(await body(page)).toBe('def f():\n    return alpha beta');
+  await run(page, 'text.delete', { type: 'PREVIOUS_WORD' });
+  expect(await body(page)).toBe('def f():\n    return alpha ');
+  await run(page, 'text.delete', { type: 'PREVIOUS_CHARACTER' });
+  // Home goes to the first non-blank character; the next word goes
+  await run(page, 'text.move', { type: 'LINE_BEGIN' });
+  await run(page, 'text.delete', { type: 'NEXT_WORD' });
+  expect(await body(page)).toBe('def f():\n     alpha');
+  // undo steps are pushed per operator
+  expect(await page.evaluate(() => (window as any).app.undo.history.at(-1).label)).toBe('Edit Text');
+  // Tab after blanks indents the line
+  await run(page, 'text.indent_or_autocomplete');
+  expect(await body(page)).toMatch(/^def f\(\):\n {6,}alpha$/);
+  const len = (await body(page)).length;
+  // cursor_set / selection_set from pointer positions over the text
+  const lines = te.locator('.te-line');
+  const l1 = (await lines.nth(0).boundingBox())!;
+  await page.evaluate(([x, y]) => { const a = (window as any).app; a.run('text.cursor_set', {}, { area: a.hoverArea, invoke: true, event: { x, y } }); }, [l1.x + 1, l1.y + l1.height / 2]);
+  expect(await sel(page)).toEqual([0, 0]);
+  const l2 = (await lines.nth(1).boundingBox())!;
+  await page.evaluate(([x, y]) => { const a = (window as any).app; a.run('text.selection_set', {}, { area: a.hoverArea, event: { x, y } }); }, [l2.x + 2000, l2.y + l2.height / 2]);
+  expect(await sel(page)).toEqual([0, len]);
+  // the selection becomes the replacement text
+  await run(page, 'text.move', { type: 'FILE_TOP' });
+  await run(page, 'text.move_select', { type: 'NEXT_WORD' });
+  await run(page, 'text.replace_set_selected');
+  await expect(te.locator('.te-sidebar')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).app.hoverArea.editor.replaceText)).toBe('def');
+  // scrolling by lines
+  await run(page, 'text.scroll', { lines: 1 });
+  await expectNoErrors(errors);
+});
+
+test('Text Editor: jump to a text by name at a line and column', async ({ page }) => {
+  const errors = await openApp(page);
+  await scripting(page, 'TEXT');
+  await run(page, 'text.new');
+  await page.evaluate(() => {
+    const a = (window as any).app;
+    const t = Object.values(a.doc.texts as Record<string, any>)[0];
+    t.name = 'tool.py';
+    t.body = 'a = 1\nbb = 2\nccc = 3\n';
+    a.changed('doc');
+  });
+  await run(page, 'text.new');
+  await page.waitForTimeout(100);
+  await run(page, 'text.jump_to_file_at_point', { filepath: '/some/dir/tool.py', line: 2, column: 2 });
+  await expect.poll(() => sel(page)).toEqual([15, 15]);
+  expect(await page.evaluate(() => (window as any).app.hoverArea.editor.text.name)).toBe('tool.py');
+  await expectNoErrors(errors);
+});
+
+test('Console: execute, history append, scrollback append, select word / all, banner, language', async ({ page }) => {
+  const errors = await openApp(page);
+  const con = await scripting(page, 'CONSOLE');
+  const input = con.locator('.pc-input');
+  await run(page, 'console.language', { language: 'javascript' });
+  await run(page, 'console.history_append', { text: '6 * 7', current_character: 1 });
+  await expect(input).toHaveValue('6 * 7');
+  expect(await input.evaluate((i: HTMLInputElement) => i.selectionStart)).toBe(1);
+  await run(page, 'console.execute');
+  await expect(con.locator('.pc-line.output', { hasText: /^42$/ })).toHaveCount(1);
+  await run(page, 'console.scrollback_append', { text: 'hello from a script', type: 'INFO' });
+  await expect(con.locator('.pc-line.info', { hasText: 'hello from a script' })).toHaveCount(1);
+  await input.fill('alpha beta');
+  await input.evaluate((i: HTMLInputElement) => i.setSelectionRange(7, 7));
+  await run(page, 'console.select_word');
+  expect(await input.evaluate((i: HTMLInputElement) => [i.selectionStart, i.selectionEnd])).toEqual([6, 10]);
+  await run(page, 'console.select_all');
+  expect(await input.evaluate((i: HTMLInputElement) => [i.selectionStart, i.selectionEnd])).toEqual([0, 10]);
+  // Tab on an empty line indents; after a name it completes
+  await input.fill('');
+  await run(page, 'console.indent_or_autocomplete');
+  await expect(input).toHaveValue('    ');
+  const n = await con.locator('.pc-line').count();
+  await run(page, 'console.banner');
+  expect(await con.locator('.pc-line').count()).toBeGreaterThan(n + 3);
+  expect(await run(page, 'console.language', { language: 'cobol' })).toBe('CANCELLED');
+  await expectNoErrors(errors.filter((e) => !/cobol/i.test(e)));
+});
+
+test('Info: select a report by index, extend toggles', async ({ page }) => {
+  const errors = await openApp(page);
+  await page.locator('.ws-tab', { hasText: 'Scripting' }).first().click();
+  await page.evaluate(() => {
+    const a = (window as any).app;
+    a.run('mesh.primitive_cube_add', { location: [3, 0, 0] }, { invoke: false });
+    a.run('mesh.primitive_cube_add', { location: [-3, 0, 0] }, { invoke: false });
+  });
+  const info = page.locator('.area[data-editor="INFO"]');
+  const b = (await info.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await run(page, 'info.select_pick', { report_index: 0 });
+  await expect(info.locator('.info-row.sel')).toHaveCount(1);
+  await run(page, 'info.select_pick', { report_index: 1, extend: true });
+  await expect(info.locator('.info-row.sel')).toHaveCount(2);
+  await run(page, 'info.select_pick', { report_index: 1 });
+  await expect(info.locator('.info-row.sel')).toHaveCount(1);
+  await expectNoErrors(errors);
+});
+
+test('Text Editor Live Edit runs the script again after edits', async ({ page }) => {
+  const errors = await openApp(page);
+  await scripting(page, 'TEXT');
+  await run(page, 'text.new');
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
+    const a = (window as any).app;
+    const ed = a.hoverArea.editor;
+    ed.text.language = 'javascript';
+    ed.liveEdit = true;
+  });
+  await run(page, 'text.insert', { text: 'window.__live = (window.__live || 0) + 1;' });
+  await expect.poll(() => page.evaluate(() => (window as any).__live ?? 0), { timeout: 4000 }).toBeGreaterThan(0);
+  await expectNoErrors(errors);
+});
+
+test('Text Editor: typing in a long text redraws only the line it changes', async ({ page }) => {
+  const errors = await openApp(page);
+  const te = await scripting(page, 'TEXT');
+  await run(page, 'text.new');
+  await page.evaluate(() => {
+    const a = (window as any).app;
+    const t = Object.values(a.doc.texts as Record<string, { body: string }>)[0];
+    t.body = Array.from({ length: 3000 }, (_, i) => `x${i} = ${i}  # line ${i}`).join('\n');
+    a.changed('doc');
+  });
+  const rows = te.locator('.te-highlight .te-line');
+  await expect(rows).toHaveCount(3000);
+  await expect(te.locator('.te-ln')).toHaveCount(3000);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__added = 0;
+    const ob = new MutationObserver((records) => {
+      for (const r of records) w.__added += r.addedNodes.length;
+    });
+    for (const sel of ['.te-highlight', '.te-gutter']) ob.observe(document.querySelector(`.area[data-editor="TEXT"] ${sel}`)!, { childList: true });
+  });
+  const ta = te.locator('.te-input');
+  await ta.focus();
+  await ta.evaluate((t: HTMLTextAreaElement) => t.setSelectionRange(t.value.indexOf('x1500'), t.value.indexOf('x1500')));
+  await page.keyboard.type('ab');
+  await expect(rows.nth(1500)).toHaveText('abx1500 = 1500  # line 1500');
+  await page.keyboard.press('Enter');
+  await expect(rows).toHaveCount(3001);
+  await expect(te.locator('.te-ln')).toHaveCount(3001);
+  await expect(te.locator('.te-ln').last()).toHaveText('3001');
+  await expect(rows.nth(1501)).toHaveText(/x1500 = 1500/);
+  // rows used to be rebuilt in full on every keystroke (6000 elements a key here)
+  expect(await page.evaluate(() => (window as any).__added)).toBeLessThan(20);
+  // undo puts the rows back as the text is
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(rows).toHaveCount(3000);
+  const shown = () => te.locator('.te-highlight').evaluate((el) => [...el.children].map((r) => r.textContent).join('\n'));
+  expect(await shown()).toBe(await ta.inputValue());
+  await expectNoErrors(errors);
+});
+
+test('Text Editor: Find Next selects the match after letters that change length in lower case', async ({ page }) => {
+  const errors = await openApp(page);
+  await scripting(page, 'TEXT');
+  await run(page, 'text.new');
+  await run(page, 'text.insert', { text: 'İİ abc ABC' });
+  await page.evaluate(() => (document.querySelector('.te-input') as HTMLTextAreaElement).setSelectionRange(3, 6));
+  await run(page, 'text.find_set_selected');
+  // 'İ' is one character but two in lower case: the match used to land two characters late
+  expect(await sel(page)).toEqual([7, 10]);
+  await run(page, 'text.find');
+  expect(await sel(page)).toEqual([3, 6]);
+  await expectNoErrors(errors);
+});

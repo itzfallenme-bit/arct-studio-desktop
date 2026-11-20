@@ -1,183 +1,118 @@
 <p align="center">
-  <picture>
-    <source alt="Nuclear Music Player"  srcset="packages/docs/.gitbook/assets/readme-banner.png">
-    <img alt="Nuclear Music Player"  srcset="packages/docs/.gitbook/assets/readme-banner.png">
-  </picture>
-
-
+  <img src="public/icon.svg" width="96" alt="Arct Studio" />
 </p>
 
-<div align="center">
-
-# Nuclear 
-
-</div>
-
-<div align="center">
-
-  Nuclear is a free, open-source music player without ads or tracking. Search for any song or artist, build playlists, and start listening.<br>
-  Runs on Windows, macOS, and Linux.
-  
-</div>
-
-## Screenshots
+<h1 align="center">Arct Studio</h1>
 
 <p align="center">
-  <img src="packages/docs/.gitbook/assets/dashboard-main.png" alt="Nuclear Music Player - Dashboard" width="100%">
+  40 local-first productivity tools in one open-source desktop workspace.
 </p>
 
-Nuclear comes with multiple built-in themes, with light and a dark modes:
+Arct Studio packages writing, spreadsheets, design, media, business, and engineering tools into a single Tauri app. Documents, settings, and tool data stay on your machine unless a tool explicitly talks to a service you choose.
 
-<p align="center">
-  <img src="packages/docs/.gitbook/assets/dashboard-aurora-light.png" alt="Aurora theme, light mode" width="32%">
-  <img src="packages/docs/.gitbook/assets/dashboard-ember-light.png" alt="Ember theme, light mode" width="32%">
-  <img src="packages/docs/.gitbook/assets/dashboard-lagoon-light.png" alt="Lagoon theme, light mode" width="32%">
-</p>
-<p align="center">
-  <img src="packages/docs/.gitbook/assets/dashboard-default-dark.png" alt="Default theme, dark mode" width="32%">
-  <img src="packages/docs/.gitbook/assets/dashboard-lagoon-dark.png" alt="Lagoon theme, dark mode" width="32%">
-  <img src="packages/docs/.gitbook/assets/dashboard-arctic-moss-dark.png" alt="Arctic Moss theme, dark mode" width="32%">
-</p>
+The app is derived from [Nuclear](https://github.com/nukeop/nuclear) and keeps its AGPL-3.0-only license. See [NOTICE.md](NOTICE.md) for upstream attribution.
 
-| | |
-|:---:|:---:|
-| ![Search artists](packages/docs/.gitbook/assets/search-artists.png) | ![Search albums](packages/docs/.gitbook/assets/search-albums.png) |
-| Artist search | Album search |
-| ![Search tracks](packages/docs/.gitbook/assets/search-tracks.png) | ![Artist page](packages/docs/.gitbook/assets/artist.png) |
-| Track search with recent searches | Artist page |
-| ![Album page](packages/docs/.gitbook/assets/album.png) | ![Favorite artists](packages/docs/.gitbook/assets/favorite-artists.png) |
-| Album page | Favorites |
-| ![Playlists](packages/docs/.gitbook/assets/playlists.png) | ![Playlist](packages/docs/.gitbook/assets/playlist-detail-view.png) |
-| Playlists | Playlist |
-| ![Synced lyrics](packages/docs/.gitbook/assets/lyrics.png) | ![Lyrics with furigana and translations](packages/docs/.gitbook/assets/lyrics-translations.png) |
-| Synced lyrics | Lyrics with furigana and translations |
-| ![Listening history](packages/docs/.gitbook/assets/history.png) | ![Listening stats](packages/docs/.gitbook/assets/history-stats.png) |
-| Listening history | Listening stats |
-| ![Stream sources](packages/docs/.gitbook/assets/stream-candidates.png) | ![Plugin store](packages/docs/.gitbook/assets/plugin-store.png) |
-| Stream sources for a queued track | Plugin store |
-| ![Installed plugins](packages/docs/.gitbook/assets/installed-plugins.png) | ![Preferences](packages/docs/.gitbook/assets/preferences.png) |
-| Installed plugins | Preferences |
-| ![What's new](packages/docs/.gitbook/assets/whats-new.png) | ![Log viewer](packages/docs/.gitbook/assets/log-viewer.png) |
-| What's new | Log viewer |
+## What is included
 
-Control Nuclear from your phone with Nuclear Jam:
+- **40 bundled tools** covering notes, documents, spreadsheets, presentations, PDF, whiteboards, CAD, circuits, 3D, audio, video, accounting, CRM, projects, and more.
+- **Local tool runtime** — tools use a local IndexedDB compatibility layer instead of the Puter cloud SDK.
+- **Your own Google AI key** — optional AI features use Google Gemini. The key is entered in Settings and stored locally on your device.
+- **No Arct account, no telemetry, no Arct cloud.**
 
-<p align="center">
-  <img src="packages/docs/.gitbook/assets/jam-remote.png" alt="Nuclear Jam remote control on a phone" width="300">
-</p>
+Some tools retain optional integrations from their upstream projects. Those integrations only run when you use them.
 
 ## Download
 
-Grab the latest release for your platform from the [Releases page](https://github.com/nukeop/nuclear/releases).
-
-| Platform | Formats |
-|----------|---------|
-| Windows | `.exe` installer, `.msi` |
-| macOS | `.dmg` (Apple Silicon and Intel) |
-| Linux | `.AppImage`, `.deb`, `.rpm`, `.flatpak` |
-
-## Features
-
-- Search for music and stream it from any source
-- Browse artist pages with biographies, discographies, and similar artists
-- Browse album pages with track listings
-- Queue management with shuffle, repeat, and drag-and-drop reordering
-- Favorites (albums, artists, and tracks)
-- Playlists (create, import, export, import from various services)
-- Powerful plugin system with a built-in plugin store
-- Themes (built-in and custom CSS themes)
-- MCP server lets your AI agent drive the player
-- Auto-updates
-- Keyboard shortcuts
-- Localized in multiple languages
-
-## Plugins
-
-Nuclear has a powerful plugin system now! Every functionality has been redesigned to be driven by plugins.
-
-Plugins can provide streaming sources, metadata, playlists, dashboard content, and more. Browse and install plugins from the built-in plugin store, or write your own using the [@nuclearplayer/plugin-sdk](https://www.npmjs.com/package/@nuclearplayer/plugin-sdk).
-
-## MCP
-
-You can enable the MCP server in Settings → Integrations.
-
-Then to add it to **Claude Code:**
-
-```bash
-claude mcp add nuclear --transport http http://127.0.0.1:8800/mcp
-```
-
-**Codex CLI:**
-
-```bash
-codex mcp add nuclear --url http://127.0.0.1:8800/mcp
-```
-
-**OpenCode:**
-
-```json
-{
-  "mcp": {
-    "nuclear": {
-      "type": "remote",
-      "url": "http://127.0.0.1:8800/mcp"
-    }
-  }
-}
-```
-
-**Claude Desktop / Cursor / Windsurf:**
-
-```json
-{
-  "mcpServers": {
-    "nuclear": {
-      "url": "http://127.0.0.1:8800/mcp"
-    }
-  }
-}
-```
-
-The MCP is designed to be discoverable, but there's a skill you can load to get your AI up to speed: [Nuclear MCP Skill](./packages/docs/.gitbook/assets/nuclear-mcp.zip)
+Prebuilt installers are published on the [Releases page](https://github.com/itzfallenme-bit/arct-studio/releases). The build workflow produces Windows, macOS, and Linux bundles.
 
 ## Development
 
-Nuclear is a pnpm monorepo managed with Turborepo. The main app is built with Tauri (Rust + React).
-
 ### Prerequisites
 
-- Node.js >= 22
-- pnpm >= 9
-- Rust (stable)
-- Platform-specific Tauri dependencies ([see Tauri docs](https://v2.tauri.app/start/prerequisites/))
+- Node.js 24 (see `.node-version`)
+- pnpm 12
+- Rust stable and the [Tauri 2 system dependencies](https://v2.tauri.app/start/prerequisites/) for desktop builds
 
-### Getting started
+### Install and run
 
 ```bash
-git clone https://github.com/nukeop/nuclear.git
-cd nuclear
 pnpm install
-pnpm dev
+pnpm dev:web      # browser UI, fastest for app-shell work
+pnpm dev          # Tauri desktop window
 ```
 
-### Useful commands
+The browser UI opens the studio shell. Bundled tools need to be built before their iframe routes exist.
+
+### Build the tools
 
 ```bash
-pnpm dev            # Run the player in dev mode
-pnpm dev:remote     # Same, but binds Vite to 0.0.0.0 so you can open the remote control UI from other devices on your LAN
-pnpm build          # Build all packages
-pnpm test           # Run all tests
-pnpm lint           # Lint all packages
-pnpm type-check     # TypeScript checks
-pnpm storybook      # Run Storybook
+pnpm tools:build
+pnpm tools:finalize
 ```
 
-## Community
+`tools:build` installs each tool's dependencies with npm and builds it into `public/tools/<slug>`. The first run can take a long time because it builds all 40 tools. Re-running skips tools that already have an `index.html`; remove a tool's output directory to rebuild it.
 
-- [Discord](https://discord.gg/JqPjKxE)
-- [Mastodon](https://fosstodon.org/@nuclearplayer)
-- [Discussions](https://github.com/nukeop/nuclear/discussions)
+`tools:finalize` verifies the expected catalog is present and regenerates `src/data/builtTools.ts`.
+
+Each bundled tool keeps its upstream icon and branding. The Arct mark is used for the studio app itself.
+
+### Build the desktop app
+
+```bash
+pnpm tools:build
+pnpm tools:finalize
+pnpm build
+```
+
+`pnpm build` runs the Tauri build, which invokes `pnpm build:frontend` and packages `dist/` with the Rust shell.
+
+Frontend-only production build:
+
+```bash
+pnpm build:frontend
+```
+
+### Checks
+
+```bash
+pnpm lint
+pnpm type-check
+pnpm test
+```
+
+## Project layout
+
+| Path | Purpose |
+|------|---------|
+| `src/` | Studio shell, catalog, views, and local state |
+| `src-tauri/` | Tauri 2 desktop shell and icons |
+| `packages/` | Vendored Nuclear UI, i18n, model, and shared config packages |
+| `tools/` | Source for the 40 bundled tools |
+| `tools/_shared/` | Local runtime shim, Google AI client, and shared logo |
+| `scripts/` | Tool build, finalization, and icon generation scripts |
+| `public/tools/` | Generated tool builds (ignored by git) |
+| `dist/` | Generated frontend build (ignored by git) |
+
+## CI and releases
+
+- `.github/workflows/ci.yml` runs lint, type checks, tests, and the frontend build on every push and pull request.
+- `.github/workflows/build.yml` builds desktop installers on demand and publishes a draft GitHub release when a `v*` tag is pushed.
+
+To cut a release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds Linux, Windows, and universal macOS bundles. Review the draft release before publishing it.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Please report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-AGPL-3.0. See [LICENSE](LICENSE).
+Arct Studio is licensed under the [GNU Affero General Public License v3.0](LICENSE), SPDX identifier `AGPL-3.0-only`.
+
+The bundled tools retain their own licenses. See each tool's `LICENSE`, `README.md`, and `THIRD_PARTY_NOTICES` files before redistributing a modified build.

@@ -1,0 +1,400 @@
+import { describe, it, expect, vi } from 'vitest';
+import { createPath, createText, createImage } from '../src/model/nodes.js';
+import { rectangle } from '../src/model/shapes.js';
+import { bootAppWithFeatures } from './helpers.js';
+import { memoryBackend } from '../src/features/files/backends.js';
+import { TemplateStore, VersionStore, versionKey, legacyKeyFor, SHARED_VERSION_MS, restoreDocumentContent, cleanInfo, splitList, fontsUsed, packageEntries } from '../src/features/panels/file-commands.js';
+import { systemInfo, systemInfoText } from '../src/features/panels/help-commands.js';
+import { serializeDocument } from '../src/features/files/format.js';
+import { hashKey } from '../src/features/files/recent.js';
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+async function openDialogEl() {
+  for (let i = 0; i < 50 && !document.querySelector('dialog[open]'); i++) await new Promise((r) => setTimeout(r, 10));
+  return document.querySelector('dialog[open]');
+}
+const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+async function setup() {
+  const app = await bootAppWithFeatures();
+  const ed = app.newDocument({ name: 'Poster', width: 200, height: 100 });
+  const doc = ed.doc;
+  const add = (node) => {
+    doc.transact('Add', () => doc.insert(node, ed.targetLayer().id));
+    return node.id;
+  };
+  return { app, ed, doc, add };
+}
+
+describe('Templates', () => {
+  it('saves a document as a template and builds new documents from it', async () => {
+    const { ed, add } = await setup();
+    add(createPath(rectangle(10, 10, 50, 20), true));
+    const store = new TemplateStore(memoryBackend());
+    const entry = await store.save(ed.doc, 'Flyer');
+    expect(entry).toMatchObject({ name: 'Flyer', width: 200, height: 100, artboards: 1 });
+    expect((await store.list()).map((t) => t.name)).toEqual(['Flyer']);
+    const doc = await store.load(entry.id, 'Untitled-9');
+    expect(doc.root.name).toBe('Untitled-9');
+    expect(doc.layers()[0].children.length).toBe(1);
+    expect(doc.undoStack.length).toBe(0);
+    await store.remove(entry.id);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('File > New from Template lists My Templates', async () => {
+    const { app, ed } = await setup();
+    await app.userTemplates.save(ed.doc, 'Mine');
+    const done = app.commands.run('file.newFromTemplate');
+    const dlg = await openDialogEl();
+    const cards = [...dlg.querySelectorAll('.newdoc-card')];
+    const mine = cards.find((c) => c.textContent.includes('Mine'));
+    expect(mine).toBeTruthy();
+    mine.click();
+    [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'New').click();
+    await done;
+    expect(app.editors.length).toBe(2);
+    expect(app.editor.doc.artboards[0]).toMatchObject({ w: 200, h: 100 });
+  });
+});
+
+describe('Version history', () => {
+  it('keeps the newest versions and restores one as an undoable step', async () => {
+    const { ed, doc, add } = await setup();
+    const store = new VersionStore(memoryBackend(), 3);
+    const key = versionKey(ed);
+    const first = await store.add(key, doc);
+    const id = add(createPath(rectangle(0, 0, 10, 10), true));
+    for (let i = 0; i < 3; i++) await store.add(key, doc);
+    const list = await store.list(key);
+    expect(list.length).toBe(3);
+    expect(list.some((v) => v.id === first.id)).toBe(false);
+    // Restore an older state.
+    const empty = new VersionStore(memoryBackend());
+    doc.transact('Remove', () => doc.remove(id));
+    const v0 = await empty.add(key, doc);
+    doc.undo();
+    expect(doc.has(id)).toBe(true);
+    const old = await empty.read(key, v0.id);
+    restoreDocumentContent(ed, old);
+    expect(doc.has(id)).toBe(false);
+    expect(doc.root.name).toBe('Poster');
+    expect(doc.undoLabel).toBe('Restore Version');
+    doc.undo();
+    expect(doc.has(id)).toBe(true);
+  });
+
+  it('keeps every version when saves land at the same time', async () => {
+    const { ed, doc } = await setup();
+    const backend = memoryBackend();
+    // A slow index read (as with real storage) lets the saves overlap.
+    const readJSON = backend.readJSON;
+    backend.readJSON = async (path) => {
+      const value = await readJSON(path);
+      await new Promise((r) => setTimeout(r, 5));
+      return value;
+    };
+    const store = new VersionStore(backend, 3);
+    const key = versionKey(ed);
+    await Promise.all([store.add(key, doc), store.add(key, doc), store.add(key, doc), store.add(key, doc)]);
+    const list = await store.list(key);
+    expect(list.length).toBe(3);
+    // Pruned versions leave no orphaned files behind.
+    expect([...backend.files.keys()].filter((k) => k.endsWith('.vstudio')).length).toBe(3);
+  });
+
+  it('saving a document keeps a version that the dialog lists', async () => {
+    const { app, ed, doc } = await setup();
+    doc.markSaved();
+    await new Promise((r) => setTimeout(r, 400));
+    const list = await app.versions.list(versionKey(ed));
+    expect(list.length).toBe(1);
+    const done = app.commands.run('file.versionHistory');
+    const dlg = await openDialogEl();
+    expect(dlg.querySelectorAll('.vh-row').length).toBe(1);
+    dlg.querySelector('.dialog-close').click();
+    await done;
+  });
+
+  it('asks before deleting a version', async () => {
+    const { app, ed, doc } = await setup();
+    await app.versions.add(versionKey(ed), doc);
+    const done = app.commands.run('file.versionHistory');
+    const dlg = await openDialogEl();
+    const del = [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Delete');
+    const confirmEl = async () => {
+      for (let i = 0; i < 50 && document.querySelectorAll('dialog[open]').length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+      return [...document.querySelectorAll('dialog[open]')].at(-1);
+    };
+    del.click();
+    let c = await confirmEl();
+    expect(c.textContent).toContain('This cannot be undone.');
+    [...c.querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click();
+    for (let i = 0; i < 20 && del.disabled; i++) await tick();
+    expect((await app.versions.list(versionKey(ed))).length).toBe(1);
+    expect(dlg.querySelectorAll('.vh-row').length).toBe(1);
+    del.click();
+    c = await confirmEl();
+    [...c.querySelectorAll('button')].find((b) => b.textContent === 'Delete').click();
+    for (let i = 0; i < 50 && dlg.querySelectorAll('.vh-row').length; i++) await tick();
+    expect(await app.versions.list(versionKey(ed))).toEqual([]);
+    dlg.querySelector('.dialog-close').click();
+    await done;
+  });
+
+  it('reports a version that can no longer be read instead of failing silently', async () => {
+    const { app, ed, doc } = await setup();
+    const entry = await app.versions.add(versionKey(ed), doc);
+    await app.versions.store.remove(`versions/${versionKey(ed)}/${entry.id}.vstudio`);
+    const notes = [];
+    app.notify = (msg, opts) => notes.push([msg, opts]);
+    const done = app.commands.run('file.versionHistory');
+    const dlg = await openDialogEl();
+    const restore = [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Restore');
+    restore.click();
+    for (let i = 0; i < 50 && !notes.length; i++) await tick();
+    expect(notes[0]).toEqual(['This version is no longer available.', { error: true }]);
+    expect(restore.disabled).toBe(false);
+    expect(dlg.open).toBe(true);
+    dlg.querySelector('.dialog-close').click();
+    await done;
+  });
+});
+
+/** Saves in this browser download the file (no cloud, no File System Access): capture the bytes. */
+function captureDownloads() {
+  const blobs = [];
+  const orig = URL.createObjectURL;
+  URL.createObjectURL = (blob) => {
+    blobs.push(blob);
+    return 'blob:x';
+  };
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  return {
+    blobs,
+    restore() {
+      click.mockRestore();
+      URL.createObjectURL = orig;
+    },
+  };
+}
+const versionsSettle = () => new Promise((r) => setTimeout(r, 400));
+
+describe('Version history of downloaded documents', () => {
+  it('documents saved under the same file name keep separate histories, which follow the file', async () => {
+    const { app, ed, add } = await setup();
+    add(createPath(rectangle(0, 0, 10, 10), true));
+    const other = app.newDocument({ name: 'Poster' });
+    const dl = captureDownloads();
+    try {
+      expect(await app.files.service.save(ed)).toBe(true);
+      expect(await app.files.service.save(other)).toBe(true);
+      expect(ed.file).toMatchObject({ kind: 'download', name: 'Poster.ai' });
+      expect(other.file).toMatchObject({ kind: 'download', name: 'Poster.ai' });
+      await versionsSettle();
+      expect(versionKey(ed)).not.toBe(versionKey(other));
+      expect((await app.versions.list(versionKey(ed))).length).toBe(1);
+      expect((await app.versions.list(versionKey(other))).length).toBe(1);
+      // Opening the downloaded file again (another day, a renamed copy) finds its history.
+      const reopened = await app.files.service.openBytes(new Uint8Array(await dl.blobs[0].arrayBuffer()), { name: 'Poster (1).ai' });
+      expect(versionKey(reopened)).toBe(versionKey(ed));
+      // Save a Copy gives the copy its own identity.
+      await app.files.service.saveAs(ed, { copy: true });
+      const copy = await app.files.service.openBytes(new Uint8Array(await dl.blobs.at(-1).arrayBuffer()), { name: 'Poster copy.ai' });
+      expect(versionKey(copy)).not.toBe(versionKey(ed));
+    } finally {
+      dl.restore();
+    }
+  });
+
+  it('a file from before documents had an identity lists its old versions and keeps them once saved', async () => {
+    const { app, ed } = await setup();
+    // Versions kept by older releases under the file name.
+    const legacy = hashKey('name:Old.ai');
+    const old = await app.versions.add(legacy, ed.doc, { name: 'Old.ai' });
+    const bytes = await serializeDocument(ed.doc, { id: null });
+    const opened = await app.files.service.openBytes(bytes, { name: 'Old.ai' });
+    expect(opened.doc.legacyVersionKey).toBe(legacy);
+    const done = app.commands.run('file.versionHistory');
+    const dlg = await openDialogEl();
+    expect(dlg.querySelectorAll('.vh-row').length).toBe(1);
+    [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'Restore').click();
+    await done;
+    expect(opened.doc.undoLabel).toBe('Restore Version');
+    // Saving gives the file an identity and takes the old versions along.
+    const dl = captureDownloads();
+    try {
+      await app.files.service.save(opened);
+      await versionsSettle();
+    } finally {
+      dl.restore();
+    }
+    expect(opened.doc.legacyVersionKey).toBe(null);
+    const ids = (await app.versions.list(versionKey(opened))).map((v) => v.id);
+    expect(ids.length).toBe(2);
+    expect(ids[0]).toBe(old.id);
+    // A document with an identity never picks up versions kept under a name.
+    expect(legacyKeyFor(opened)).toBe(null);
+  });
+
+  it('a document shown in two windows keeps one version per save', async () => {
+    const { app, ed } = await setup();
+    await app.commands.run('window.newWindow');
+    expect(app.editors.filter((e) => e.doc === ed.doc).length).toBe(2);
+    app.activate(ed);
+    ed.doc.markSaved();
+    await versionsSettle();
+    expect((await app.versions.list(versionKey(ed))).length).toBe(1);
+  });
+
+  it('keeps no duplicate version when nothing changed, and shared documents only now and then', async () => {
+    const { app, ed, doc, add } = await setup();
+    const count = async () => (await app.versions.list(versionKey(ed))).length;
+    doc.markSaved();
+    await versionsSettle();
+    doc.markSaved();
+    await versionsSettle();
+    expect(await count()).toBe(1);
+    add(createPath(rectangle(0, 0, 10, 10), true));
+    doc.markSaved();
+    await versionsSettle();
+    expect(await count()).toBe(2);
+    // A shared document counts as saved each time the server has every edit (every few seconds).
+    const shared = app.newDocument({ name: 'Team' });
+    shared.file = { kind: 'shared', name: 'Team', server: 'https://x.puter.work', room: 'r1' };
+    const sharedCount = async () => (await app.versions.list(versionKey(shared))).length;
+    const layer = shared.targetLayer().id;
+    for (let i = 0; i < 3; i++) {
+      shared.doc.transact('Add', () => shared.doc.insert(createPath(rectangle(i, 0, 10, 10), true), layer));
+      shared.doc.markSaved();
+      await versionsSettle();
+    }
+    expect(await sharedCount()).toBe(1);
+    const now = Date.now();
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(now + SHARED_VERSION_MS + 1000);
+    try {
+      shared.doc.transact('Add', () => shared.doc.insert(createPath(rectangle(50, 0, 10, 10), true), layer));
+      shared.doc.markSaved();
+      await versionsSettle();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await sharedCount()).toBe(2);
+  });
+
+  it('templates and versions do not pass on the identity of the document they came from', async () => {
+    const { app, ed } = await setup();
+    versionKey(ed);
+    expect(ed.doc.fileId).toBeTruthy();
+    const entry = await app.userTemplates.save(ed.doc, 'Mine');
+    expect((await app.userTemplates.load(entry.id, 'Untitled-5')).fileId).toBe(null);
+    const v = await app.versions.add(versionKey(ed), ed.doc);
+    expect((await app.versions.read(versionKey(ed), v.id)).fileId).toBe(null);
+  });
+});
+
+describe('Document color mode', () => {
+  it('switches the mode (undoable) and the Color panel default', async () => {
+    const { app, doc } = await setup();
+    expect(app.commands.isChecked('file.colorMode.rgb')).toBe(true);
+    await app.commands.run('file.colorMode.cmyk');
+    expect(doc.root.colorMode).toBe('CMYK');
+    expect(app.commands.isChecked('file.colorMode.cmyk')).toBe(true);
+    expect(app.prefs.get('colorPanelMode')).toBe('cmyk');
+    app.renderTabs();
+    expect(document.querySelector('.doc-tab-btn').textContent).toContain('(CMYK/');
+    doc.undo();
+    expect(doc.root.colorMode).toBe('RGB');
+  });
+});
+
+describe('File Info', () => {
+  it('normalizes metadata', () => {
+    expect(splitList('a; b, c\nd')).toEqual(['a', 'b', 'c', 'd']);
+    const info = cleanInfo({ title: ' T ', author: 'Ada; Grace', keywords: 'x, y', copyrightStatus: 'unknown', copyrightUrl: 'example.com', description: '' });
+    expect(info).toMatchObject({ title: 'T', author: ['Ada', 'Grace'], keywords: ['x', 'y'], copyrightUrl: 'https://example.com' });
+    expect(info.copyrightStatus).toBeUndefined();
+    expect(info.description).toBeUndefined();
+    expect(info.created).toBeTypeOf('number');
+  });
+
+  it('is edited in a dialog and written to SVG and PDF', async () => {
+    const { app, ed, doc, add } = await setup();
+    add(createPath(rectangle(10, 10, 50, 20), true));
+    const done = app.commands.run('file.info');
+    await tick();
+    const dlg = document.querySelector('dialog[open]');
+    const set = (label, v) => {
+      const l = [...dlg.querySelectorAll('label')].find((x) => x.textContent === label);
+      const input = dlg.querySelector(`#${l.getAttribute('for')}`);
+      input.value = v;
+    };
+    set('Document Title', 'Spring Poster');
+    set('Author', 'Ada Lovelace');
+    set('Keywords', 'spring, poster');
+    set('Description', 'A poster & more');
+    [...dlg.querySelectorAll('button')].find((b) => b.textContent === 'OK').click();
+    await done;
+    expect(doc.root.info).toMatchObject({ title: 'Spring Poster', author: ['Ada Lovelace'], keywords: ['spring', 'poster'] });
+    const svg = await app.exporters.svg(ed, {});
+    expect(svg).toContain('<title>Spring Poster</title>');
+    expect(svg).toContain('<desc>A poster &amp; more</desc>');
+    expect(svg).toContain('<dc:creator>Ada Lovelace</dc:creator>');
+    expect(svg).toContain('<dc:subject>spring</dc:subject>');
+    const pdf = new TextDecoder('latin1').decode(await app.exporters.pdf(ed, {}));
+    expect(pdf).toContain('/Title (Spring Poster)');
+    expect(pdf).toContain('/Author (Ada Lovelace)');
+    expect(pdf).toContain('/Keywords (spring; poster)');
+    doc.undo();
+    expect(doc.root.info).toBeUndefined();
+  });
+});
+
+describe('Package', () => {
+  it('collects the document, its images and a fonts report', async () => {
+    const { app, ed, doc, add } = await setup();
+    doc.assets.set('img1', { mime: 'image/png', data: PNG_1x1, name: 'logo' });
+    add(createImage('img1', 1, 1, [10, 0, 0, 10, 0, 0]));
+    const t = createText('Hello', 0, 50);
+    add({ ...t, char: { ...t.char, fontFamily: 'Inter', fontWeight: 700 } });
+    expect(fontsUsed(doc)).toEqual([{ family: 'Inter', weight: 700, style: 'normal', count: 1 }]);
+    const { entries, report } = await packageEntries(app, ed, { includeFonts: false });
+    const names = entries.map((e) => e.name);
+    expect(names).toContain('Poster/Poster.ai');
+    expect(names).toContain('Poster/Links/logo.png');
+    expect(names).toContain('Poster/Report.txt');
+    expect(report).toMatch(/Inter 700/);
+    expect(report).toMatch(/logo\.png/);
+    // Package options: folder name, images at the top level or left out, no report.
+    const flat = (await packageEntries(app, ed, { includeFonts: false, linksFolder: false, report: false, folder: 'Out' })).entries.map((e) => e.name);
+    expect(flat).toEqual(['Out/Poster.ai', 'Out/logo.png']);
+    const bare = (await packageEntries(app, ed, { includeFonts: false, copyLinks: false })).entries.map((e) => e.name);
+    expect(bare).toEqual(['Poster/Poster.ai', 'Poster/Report.txt']);
+  });
+});
+
+describe('Help', () => {
+  it('shows the welcome screen', async () => {
+    const { app } = await setup();
+    await app.commands.run('help.welcome');
+    expect(app.home.hidden).toBe(false);
+  });
+
+  it("opens What's New and System Info", async () => {
+    const { app } = await setup();
+    let done = app.commands.run('help.whatsNew');
+    await tick();
+    let dlg = document.querySelector('dialog[open]');
+    expect(dlg.querySelectorAll('.whats-new-list li').length).toBeGreaterThan(3);
+    dlg.querySelector('.dialog-close').click();
+    await done;
+    const sections = await systemInfo(app);
+    expect(sections.map(([t]) => t)).toEqual(['Application', 'Browser', 'Display', 'Graphics', 'Hardware', 'Storage']);
+    expect(systemInfoText(sections)).toMatch(/User agent: /);
+    done = app.commands.run('help.systemInfo');
+    dlg = await openDialogEl();
+    expect([...dlg.querySelectorAll('button')].some((b) => b.textContent === 'Copy')).toBe(true);
+    dlg.querySelector('.dialog-close').click();
+    await done;
+  });
+});

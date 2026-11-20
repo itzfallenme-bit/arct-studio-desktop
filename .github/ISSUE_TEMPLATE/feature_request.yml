@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability or improvement for Arct Studio
+title: '[Feature]: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Arct Studio is local-first. Requests that require an Arct account or a mandatory cloud service are out of scope, but optional integrations are welcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: tool
+    attributes:
+      label: Related tool
+      placeholder: Studio shell, Notes, CAD...
+  - type: checkboxes
+    id: local-first
+    attributes:
+      label: Local-first check
+      options:
+        - label: This can work without an Arct account or Arct cloud storage.
+          required: true

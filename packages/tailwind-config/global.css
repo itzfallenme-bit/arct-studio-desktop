@@ -1,12 +1,10 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source(none);
 @import 'tw-animate-css';
 @import './utilities.css';
 @import './theme.css';
 
-@source '../player';
 @source '../ui';
-@source '../storybook';
-@source '../videos';
+@source '../../../../src';
 
 :root {
   /* Surfaces and their foregrounds */

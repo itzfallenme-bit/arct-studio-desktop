@@ -1,5 +1,0 @@
-{
-  "rust-analyzer.linkedProjects": [
-    "packages/player/src-tauri/Cargo.toml"
-  ]
-}

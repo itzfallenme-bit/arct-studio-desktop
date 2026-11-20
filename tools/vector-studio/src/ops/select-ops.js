@@ -1,0 +1,162 @@
+/**
+ * Select menu operations.
+ */
+import { UserError } from '../lib/errors.js';
+import { nodeBounds, rectsIntersect } from '../model/geometry.js';
+
+/** Top-level selectable objects (children of unlocked, visible layers and sublayers, never the layers themselves). */
+export function selectableTargets(editor) {
+  const { doc } = editor;
+  const out = [];
+  const root = editor.isolation ? [editor.isolation] : doc.root.children;
+  // An isolated single object (path, text...) is the only target.
+  const iso = editor.isolation && doc.get(editor.isolation);
+  // Nothing inside an isolated object that was hidden or locked meanwhile (itself or a layer around it).
+  if (iso && (doc.isHidden(iso.id) || doc.isLocked(iso.id))) return [];
+  if (iso && (!iso.children || iso.type === 'compound')) return [iso.id];
+  for (const lid of root) layerObjects(doc, lid, out);
+  return out;
+}
+
+/** Selectable top-level objects of a layer and its visible, unlocked sublayers (appended to `out`). */
+export function layerObjects(doc, layerId, out = []) {
+  const layer = doc.get(layerId);
+  if (!layer || layer.hidden || layer.locked) return out;
+  for (const id of layer.children) {
+    const n = doc.get(id);
+    if (!n || n.hidden || n.locked) continue;
+    if (n.type === 'layer') layerObjects(doc, id, out);
+    else out.push(id);
+  }
+  return out;
+}
+
+export function selectAll(editor) {
+  editor.select(selectableTargets(editor));
+}
+
+export function selectAllOnArtboard(editor) {
+  const a = editor.artboard();
+  if (!a) return;
+  const ids = selectableTargets(editor).filter((id) => {
+    const b = nodeBounds(editor.doc, editor.doc.get(id));
+    return b && rectsIntersect(b, a);
+  });
+  editor.select(ids);
+}
+
+export function selectInverse(editor) {
+  const sel = new Set(editor.topSelection());
+  editor.select(selectableTargets(editor).filter((id) => !sel.has(id)));
+}
+
+/** Walk editable artwork in the current isolation scope, skipping hidden or locked subtrees. */
+export function walkSelectable(editor, visit) {
+  const { doc } = editor;
+  const root = editor.isolation || 'root';
+  if (!doc.has(root) || doc.isHidden(root) || doc.isLocked(root)) return;
+  doc.walk((n) => {
+    if (n.hidden || n.locked) return false;
+    return visit(n);
+  }, root);
+}
+
+/** All paintable leaves (paths, compounds, text) that are visible and unlocked. */
+function leaves(editor) {
+  const out = [];
+  walkSelectable(editor, (n) => {
+    if (n.type === 'compound') {
+      out.push(n);
+      return false;
+    }
+    if (n.type === 'path' || n.type === 'text' || n.type === 'image') out.push(n);
+    return true;
+  });
+  return out;
+}
+
+/** A brush reference without its random seed (two strokes with the same brush and options match). */
+const brushKey = (n) => {
+  if (!n.brush?.id) return '';
+  const { seed, ...rest } = n.brush;
+  return JSON.stringify(rest);
+};
+
+function paintKey(p) {
+  if (!p) return 'none';
+  if (p.type === 'solid') return JSON.stringify({ t: p.type, c: p.color.toLowerCase() });
+  if (p.type === 'pattern') return JSON.stringify({ t: p.type, id: p.id });
+  if (p.type === 'freeform') return JSON.stringify({
+    t: p.type,
+    points: (p.points || []).map(({ x, y, color, opacity = 1, spread = 0 }) => ({ x, y, color: color.toLowerCase(), opacity, spread })),
+    lines: p.mode === 'lines' ? (p.lines || []) : [],
+  });
+  return JSON.stringify({ t: p.type, s: p.stops });
+}
+
+/** Select > Same > ... `what`: fill | stroke | fillStroke | strokeWeight | opacity | blendMode | appearance | shape */
+export function selectSame(editor, what) {
+  const ref = editor.selectedNodes().find((n) => n.type !== 'group' && n.type !== 'layer');
+  if (!ref) throw new UserError('Select an object to match.');
+  const keyOf = {
+    fill: (n) => paintKey(n.fill),
+    stroke: (n) => paintKey(n.stroke),
+    fillStroke: (n) => paintKey(n.fill) + '|' + paintKey(n.stroke),
+    strokeWeight: (n) => (n.stroke ? String(n.strokeWidth) : 'none'),
+    opacity: (n) => String(n.opacity ?? 1),
+    blendMode: (n) => n.blendMode || 'normal',
+    // Brushes (with their per-stroke options) and width profiles are part of the appearance.
+    appearance: (n) => [paintKey(n.fill), paintKey(n.stroke), n.strokeWidth, n.opacity ?? 1, n.blendMode, JSON.stringify(n.effects || []), brushKey(n), JSON.stringify(n.widthProfile || null), JSON.stringify(n.appearance || null)].join('|'),
+    shape: (n) => n.shape?.kind || n.type,
+  }[what];
+  const target = keyOf(ref);
+  editor.select(leaves(editor).filter((n) => n.type !== 'image' && keyOf(n) === target).map((n) => n.id));
+}
+
+/** Select > Object > ... `what`: text | clipping | stray | sameLayer */
+export function selectObjects(editor, what) {
+  const { doc } = editor;
+  if (what === 'sameLayer') {
+    const layers = new Set(editor.topSelection().map((id) => doc.layerOf(id)?.id));
+    editor.select(selectableTargets(editor).filter((id) => layers.has(doc.layerOf(id)?.id)));
+    return;
+  }
+  const out = [];
+  walkSelectable(editor, (n) => {
+    if (what === 'text' && n.type === 'text') out.push(n.id);
+    if (what === 'clipping' && n.type === 'group' && n.clip && n.children.length) {
+      const mask = doc.get(n.children[n.children.length - 1]);
+      if (mask && !mask.hidden && !mask.locked) out.push(mask.id);
+    }
+    if (what === 'stray' && n.type === 'path' && n.anchors.length === 1) out.push(n.id);
+    return true;
+  });
+  editor.select(out);
+}
+
+/** Next object above/below the current one in stacking order (within its parent), skipping hidden and locked ones and sublayers. */
+export function selectNext(editor, dir) {
+  const { doc } = editor;
+  const sel = editor.topSelection();
+  if (!sel.length) return;
+  const id = dir > 0 ? sel[sel.length - 1] : sel[0];
+  const n = doc.get(id);
+  const parent = doc.get(n.parent);
+  const kids = parent.children;
+  for (let i = kids.indexOf(id) + dir; i >= 0 && i < kids.length; i += dir) {
+    const next = doc.get(kids[i]);
+    if (next && !doc.isHidden(next.id) && !doc.isLocked(next.id) && editor.inIsolation(next.id) && next.type !== 'layer') {
+      editor.select([next.id]);
+      return;
+    }
+  }
+}
+
+/** Remember and restore selections (Select > Reselect). */
+export function reselect(editor, last) {
+  if (!last) return [];
+  const { doc } = editor;
+  const ids = last.filter((id) => doc.has(id) && !doc.isHidden(id) && !doc.isLocked(id) && editor.inIsolation(id));
+  editor.select(ids);
+  return ids;
+}

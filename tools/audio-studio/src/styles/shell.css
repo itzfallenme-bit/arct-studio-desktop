@@ -1,0 +1,936 @@
+/* App frame: app bar, toolbar, docked workspace, status bar. */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  /* Clear of notches and of the home indicator (the bottom panel's tabs and controls on phones). */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  background: var(--bg-app);
+}
+
+/* -------------------------------------------------------------- app bar */
+
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 6px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
+}
+
+.app-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 2px;
+  color: var(--text-strong);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.app-logo {
+  display: inline-flex;
+}
+
+.app-icon {
+  display: block;
+  flex: none;
+  user-select: none;
+}
+
+.app-menu-btn {
+  display: none;
+}
+
+.menubar {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.menubar-item {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: default;
+}
+
+.menubar-item:hover,
+.menubar-item.open {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.doc-title {
+  margin-left: 12px;
+  overflow: hidden;
+  color: var(--text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+}
+
+.account-signin {
+  height: 22px;
+}
+
+/* <puter-user-menu> (puter.js; src/ui/user-menu.js): when the loaded puter.js has it, it holds
+   the Apps launcher and the account in place of the Sign in and account buttons. Its parts
+   take the app bar's button and avatar looks, its panels the menus'. */
+puter-user-menu {
+  flex: none;
+}
+
+puter-user-menu::part(apps-button) {
+  width: var(--control);
+  height: var(--control);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+puter-user-menu::part(apps-button):hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+puter-user-menu::part(avatar) {
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  font-size: 11px;
+}
+
+puter-user-menu::part(sign-in) {
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-fill);
+  border-radius: var(--radius);
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+puter-user-menu::part(sign-in):hover {
+  border-color: var(--accent-fill-hover);
+  background: var(--accent-fill-hover);
+}
+
+puter-user-menu::part(menu),
+puter-user-menu::part(apps-panel) {
+  box-shadow: var(--shadow-pop);
+  background: var(--bg-raised);
+  border-color: var(--border);
+  --caret-border: var(--border);
+  --caret-fill: var(--bg-raised);
+}
+
+.account-btn {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.avatar.placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+}
+
+/* -------------------------------------------------------------- toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 8px;
+  /* Toolbar and status bar share the panels' surface; the workspace gutter separates them. */
+  background: var(--bg-panel);
+  flex: none;
+  min-width: 0;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--divider);
+  flex: none;
+}
+
+.mode-switch {
+  display: flex;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel-alt);
+  overflow: hidden;
+  flex: none;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.mode-btn + .mode-btn {
+  border-left: 1px solid var(--border-soft);
+}
+
+.mode-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+/* The current editor and tool sit sunken into the bar, drawn in the accent color.
+   Accent text moved a little toward the text color reads at 4.5:1 on the well, for every accent. */
+.mode-btn.on {
+  background: var(--bg-app);
+  color: color-mix(in srgb, var(--accent-strong) 80%, var(--text-strong));
+}
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.tool-group .icon-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+}
+
+.tool-group .icon-btn[aria-pressed='true'] {
+  border-color: var(--border-soft);
+  background: var(--bg-app);
+  color: color-mix(in srgb, var(--accent-strong) 85%, var(--text-strong));
+}
+
+.workspace-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-tab {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-tab:hover {
+  color: var(--text-strong);
+}
+
+.workspace-tab[aria-selected='true'] {
+  padding-right: 4px;
+  color: color-mix(in srgb, var(--accent-strong) 80%, var(--text-strong));
+}
+
+.icon-btn.workspace-menu-btn {
+  width: 20px;
+  height: 22px;
+  margin-right: 6px;
+  color: var(--accent-strong);
+}
+
+/* The workspace overflow button is hidden on tablets and phones (workspaces are desktop only). */
+.toolbar .icon-btn[hidden] {
+  display: none;
+}
+
+.command-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.command-search-wrap > svg {
+  position: absolute;
+  left: 7px;
+}
+
+.command-search {
+  width: 190px;
+  padding-left: 26px;
+}
+
+/* Wide windows: menu bar and toolbar share one row (shell.js decides when it fits). */
+.chrome-merged .appbar {
+  height: 38px;
+  gap: 2px;
+}
+
+.chrome-merged .app-name,
+.chrome-merged .doc-title,
+.chrome-merged .appbar-spacer,
+.chrome-merged .workspace-tab:not([aria-selected='true']) {
+  display: none;
+}
+
+.chrome-merged .app-title {
+  padding-right: 2px;
+}
+
+.chrome-merged .toolbar {
+  flex: 1;
+  height: 100%;
+  padding: 0 0 0 6px;
+  background: transparent;
+}
+
+/* The search field starts narrower in one row and widens while you type in it. */
+.chrome-merged .command-search {
+  width: 120px;
+  transition: width 120ms var(--ease);
+}
+
+.chrome-merged .command-search:focus {
+  width: 180px;
+}
+
+.chrome-merged .toolbar::before {
+  content: '';
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin-right: 4px;
+  background: var(--divider);
+}
+
+/* ------------------------------------------------------------ workspace */
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  padding: 3px;
+  gap: 0;
+}
+
+.dock-row,
+.dock-col {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-row {
+  flex-direction: row;
+}
+
+.dock-col {
+  flex-direction: column;
+}
+
+.dock-split {
+  flex: none;
+  background: transparent;
+  touch-action: none;
+}
+
+.dock-row > .dock-split {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.dock-col > .dock-split {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.dock-split:hover,
+.dock-split.active,
+.dock-split:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+/* Touch: a 20 px grab area over the 4 px line, reaching into the frames on both sides. */
+@media (pointer: coarse) {
+  .dock-split {
+    position: relative;
+    z-index: 2;
+  }
+
+  .dock-split::before {
+    content: '';
+    position: absolute;
+    touch-action: none;
+  }
+
+  .dock-row > .dock-split::before {
+    inset: 0 -8px;
+  }
+
+  .dock-col > .dock-split::before {
+    inset: -8px 0;
+  }
+}
+
+.panel-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 60px;
+  min-height: 48px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.panel-group.focused {
+  border-color: var(--accent);
+}
+
+.panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--tab);
+  padding: 0 6px;
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* A strip scrolled to show its current tab fades at the left, so the cut tab reads as more tabs. */
+.panel-tabs.scrolled {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px);
+  mask-image: linear-gradient(to right, transparent 0, #000 24px);
+}
+
+/* More tabs past the right edge (beside the overflow chevron): that edge fades too. */
+.panel-tabs.clipped {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 24px);
+  mask-image: linear-gradient(to left, transparent 0, #000 24px);
+}
+
+.panel-tabs.scrolled.clipped {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+}
+
+.panel-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.panel-tab {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-tab:hover {
+  color: var(--text-strong);
+}
+
+.panel-tab.dragging {
+  opacity: 0.45;
+}
+
+.panel-tab[aria-selected='true'] {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+/* Reserves the bold label's width, so tabs keep their places when the current one changes. */
+.panel-tab[data-label]::before {
+  content: attr(data-label) / '';
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+}
+
+.panel-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  /* Neutral: the accent marks the focused frame (its border), not every group's current tab. */
+  background: var(--tab-mark);
+}
+
+.panel-menu-btn {
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+}
+
+/* A finger-sized target on touch screens: a transparent hit area fills the taller tab strip
+   and the gaps beside the button without widening the strip, so no tab label gets cut off. */
+@media (pointer: coarse) {
+  .panel-menu-btn {
+    position: relative;
+  }
+
+  .panel-menu-btn::before {
+    content: '';
+    position: absolute;
+    inset: -9px -8px -9px -6px;
+  }
+}
+
+.panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panel {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+.dock-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1200;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+}
+
+.dock-drop {
+  position: fixed;
+  z-index: 1100;
+  display: none;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: left 80ms var(--ease), top 80ms var(--ease), width 80ms var(--ease), height 80ms var(--ease);
+}
+
+
+/* What letting go does, in words, in the middle of the highlighted area. */
+.dock-drop-label {
+  max-width: calc(100% - 12px);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-drop-label:empty {
+  display: none;
+}
+
+/* A new floating window: its outline at the size it will open. */
+.dock-drop.zone-float {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  transition: none;
+}
+
+/* Between two tabs: an insertion bar. */
+.dock-drop.zone-tabs {
+  border: 0;
+  border-radius: 1px;
+  background: var(--accent);
+  transition: none;
+}
+
+.dock-drop.zone-tabs .dock-drop-label {
+  display: none;
+}
+
+/* The frame a split divides. */
+.dock-drop-frame {
+  position: fixed;
+  z-index: 1099;
+  display: none;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+/* A panel a menu command opened (Match Loudness, Diagnostics): its frame
+   glows for a moment so it is found wherever it docks. */
+.panel-group.panel-attention {
+  animation: panel-attention 1.5s ease-out;
+}
+
+@keyframes panel-attention {
+  0%,
+  40% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft), 0 0 18px var(--accent-soft);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-group.panel-attention {
+    animation: none;
+    border-color: var(--accent);
+  }
+}
+
+/* Floating frames: a panel frame in a window over the workspace, moved by its
+   tab strip (or grip) and resized from the corner. */
+.dock-float {
+  position: fixed;
+  z-index: 800;
+  display: flex;
+  min-width: 220px;
+  min-height: 140px;
+  max-width: calc(100vw - 8px);
+  max-height: calc(100vh - 8px);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-dialog);
+  resize: both;
+  overflow: hidden;
+}
+
+.dock-float > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-float {
+  background: var(--bg-app);
+  border: 1px solid var(--divider);
+}
+
+.dock-float .panel-group.focused {
+  border-color: var(--accent);
+}
+
+.dock-float .panel-tabs {
+  cursor: move;
+}
+
+.dock-float .panel-tab {
+  cursor: pointer;
+}
+
+.dock-float {
+  flex-direction: column;
+}
+
+.dock-float-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 22px;
+  padding: 0 2px 0 6px;
+  background: var(--bg-panel-alt);
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  cursor: move;
+  user-select: none;
+}
+
+.dock-float-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-btn.dock-float-btn {
+  width: 20px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* ----------------------------------------------------------- status bar */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 22px;
+  padding: 0 10px calc(env(safe-area-inset-bottom) * 0) 10px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  flex: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* View > Status Bar > Show Status Bar turned off. */
+.statusbar[hidden] {
+  display: none;
+}
+
+.status-info {
+  display: flex;
+  gap: 0;
+}
+
+.status-cell {
+  padding: 0 10px;
+  border-left: 1px solid var(--divider);
+}
+
+.drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: none;
+  place-items: center;
+  background: var(--overlay);
+  pointer-events: none;
+}
+
+.drop-hint.on {
+  display: grid;
+}
+
+.drop-hint-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 40px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  color: var(--text-strong);
+}
+
+/* ------------------------------------------------------------ responsive */
+
+/* Narrower windows keep the current workspace and its menu; the others are under the chevron. */
+@media (max-width: 1280px) {
+  .workspace-tab:not([aria-selected='true']) {
+    display: none;
+  }
+}
+
+[data-layout='tablet'] .command-search {
+  width: 140px;
+}
+
+[data-layout='tablet'] .menubar-item {
+  padding: 0 6px;
+}
+
+[data-layout='phone'] .menubar,
+[data-layout='phone'] .doc-title,
+[data-layout='phone'] .workspace-tabs,
+[data-layout='phone'] .command-search-wrap,
+[data-layout='phone'] .toolbar-sep {
+  display: none;
+}
+
+[data-layout='phone'] .app-menu-btn {
+  display: inline-flex;
+}
+
+[data-layout='phone'] .appbar {
+  height: 40px;
+}
+
+[data-layout='phone'] .toolbar {
+  height: auto;
+  min-height: 40px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+[data-layout='phone'] .mode-btn span {
+  display: none;
+}
+
+[data-layout='phone'] .workspace {
+  padding: 2px;
+}
+
+[data-layout='phone'] .statusbar {
+  display: none;
+}
+
+[data-layout='tablet'] .menubar-item,
+[data-layout='phone'] .menubar-item {
+  font-size: var(--fs-md);
+}
+
+/* Overflow chevron at the end of a clipped tab strip. */
+/* Sticks over the strip's right padding too, so no tab text shows beside it. */
+.panel-tabs-more {
+  position: sticky;
+  right: -6px;
+  flex: none;
+  width: 28px;
+  height: 100%;
+  margin-left: auto;
+  margin-right: -6px;
+  padding-right: 6px;
+  border-radius: 0;
+  background: var(--bg-panel);
+}
+
+/* Tabs running under the chevron fade out beside it. */
+.panel-tabs-more::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 100%;
+  bottom: 0;
+  width: 24px;
+  background: linear-gradient(to right, transparent, var(--bg-panel));
+  pointer-events: none;
+}
+
+.panel-tabs-more[hidden] {
+  display: none;
+}
+
+/* Edit Workspaces dialog */
+.ws-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(440px, 82vw);
+}
+.ws-main {
+  display: flex;
+  gap: 6px;
+  min-height: 0;
+}
+.ws-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-list {
+  flex: 1;
+  min-width: 0;
+  max-height: 52vh;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  outline: none;
+}
+.ws-list:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.ws-group {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.ws-empty {
+  padding: 6px 10px 6px 34px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-sm);
+}
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: grab;
+}
+.ws-row > svg {
+  flex: none;
+  color: var(--text-faint);
+}
+.ws-row[aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+.ws-row.dragging {
+  opacity: 0.5;
+}
+.ws-name {
+  flex: 1;
+  min-width: 0;
+}
+.ws-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}

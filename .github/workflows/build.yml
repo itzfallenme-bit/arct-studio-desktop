@@ -1,0 +1,115 @@
+name: Build desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            platform: ubuntu-22.04
+            artifact: linux-x64
+            bundle: src-tauri/target/release/bundle
+            args: ''
+          - name: Windows x64
+            platform: windows-latest
+            artifact: windows-x64
+            bundle: src-tauri/target/release/bundle
+            args: ''
+          - name: macOS universal
+            platform: macos-latest
+            artifact: macos-universal
+            bundle: src-tauri/target/universal-apple-darwin/release/bundle
+            args: '--target universal-apple-darwin'
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets || '' }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache bundled tools
+        uses: actions/cache@v4
+        with:
+          path: public/tools
+          key: arct-tools-${{ runner.os }}-${{ hashFiles('tools/**/package.json', 'tools/**/src/**', 'tools/**/public/**', 'tools/_shared/**', 'scripts/build-tools.mjs', 'scripts/finalize-tools.mjs') }}
+          restore-keys: |
+            arct-tools-${{ runner.os }}-
+
+      - name: Build bundled tools
+        run: pnpm tools:build
+
+      - name: Verify bundled tools
+        run: pnpm tools:finalize
+
+      - name: Build installers (manual run)
+        if: github.ref_type != 'tag'
+        run: pnpm tauri build ${{ matrix.args }}
+
+      - name: Build and publish (tag)
+        if: github.ref_type == 'tag'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Arct Studio ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: arct-studio-${{ matrix.artifact }}
+          path: ${{ matrix.bundle }}
+          if-no-files-found: error
+          retention-days: 14

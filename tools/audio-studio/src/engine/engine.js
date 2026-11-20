@@ -1,0 +1,649 @@
+// Main-thread side of playback and recording. The engine owns one AudioContext
+// running the mixer worklet. Sample data stays on the main thread in immutable
+// Channels; while playing, a feeder streams the CHUNK-sized pieces that clips
+// need around the playhead (and the loop start) and drops the rest, so the
+// worklet holds a few seconds of audio regardless of project size.
+
+import mixerUrl from './mixer-worklet.js?worker&url';
+import captureUrl from './capture-worklet.js?worker&url';
+import { Emitter } from '../lib/emitter.js';
+import { CHUNK, graphLength } from './mixcore.js';
+import { dspBytes } from '../audio/dsp.js';
+import { UserError } from '../lib/errors.js';
+
+const LOOKAHEAD_S = 4;
+const KEEP_BEHIND_S = 1;
+
+const channelIds = new WeakMap();
+let nextChannelId = 1;
+
+/** Stable key for a list of Channels (changes whenever any channel changes). */
+export function sourceKey(channels) {
+  return channels
+    .map((c) => {
+      let id = channelIds.get(c);
+      if (!id) channelIds.set(c, (id = nextChannelId++));
+      return id;
+    })
+    .join(':');
+}
+
+/** A two-entry channel map of device channel indices (-1 = none). */
+export function cleanMap(map) {
+  const v = Array.isArray(map) ? map : [];
+  return [0, 1].map((i) => {
+    const n = Math.round(Number(v[i]));
+    return Number.isFinite(n) && n >= -1 && n < 32 ? n : i;
+  });
+}
+
+const wholeFrame = (f) => Math.max(0, Math.round(Number(f) || 0));
+const wholeLoop = (loop) => (loop ? { ...loop, start: wholeFrame(loop.start), end: wholeFrame(loop.end) } : null);
+const needsEffects = (graph) => {
+  const active = (chain) => chain?.some((slot) => slot.enabled !== false || slot.shadow);
+  return active(graph.master?.fx) || graph.tracks.some((track) => active(track.fx) || track.clips?.some((clip) => active(clip.fx)));
+};
+
+/**
+ * The AudioContext latency hint for a preference: a named mode as it is, a buffer size in
+ * samples as seconds at the context's rate (48 kHz when the rate is the device's).
+ */
+export function latencySeconds(hint, rate) {
+  const n = Number(hint);
+  return typeof hint === 'number' || (typeof hint === 'string' && /^\d+$/.test(hint)) ? Math.max(32, n) / (rate || 48000) : hint;
+}
+
+export class Engine extends Emitter {
+  constructor() {
+    super();
+    this.ctx = null;
+    this.node = null;
+    this.rate = 48000;
+    this.state = 'stopped'; // 'stopped' | 'playing'
+    this.graph = { rate: 48000, tracks: [], master: { gain: 1 } };
+    this.sources = new Map(); // key -> Channel[]
+    this.sent = new Map(); // key -> Set(chunk index)
+    // While playing: the last position report already heard (or the play,
+    // seek or loop jump point until its audio is heard), and the reports
+    // after it that are still on their way through the output latency.
+    this.lastPos = { frame: 0, time: 0 };
+    this.reports = [];
+    this.seq = 0; // play/seek generation: reports from before a jump are ignored
+    this.range = { from: 0, to: null, loop: null };
+    this.timer = 0;
+    this.meters = { master: [0, 0], tracks: new Map() };
+    this.input = null;
+    this.inputRequest = 0;
+    this.contextPromise = null;
+    this.dspInit = null;
+    this.dspRequest = 0;
+    // Preferences > Audio Hardware and Audio Channel Mapping.
+    this.latencyHint = 'interactive';
+    this.sinkId = '';
+    this.outputMap = [0, 1]; // device output for file channel 1 and 2 (-1 = none)
+    this.inputMap = [0, 1]; // device input feeding file channel 1 and 2 (-1 = none)
+    this.outputRoute = null;
+  }
+
+  get available() {
+    return typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined';
+  }
+
+  /** Creates (or re-creates at a new rate) the AudioContext. Must follow a user gesture. */
+  async ensure(rate = this.rate) {
+    // A new latency mode recreates the context, but never in the middle of playback.
+    const restart = this.hintChanged && this.state !== 'playing';
+    // A context the browser closed is replaced; a suspended or interrupted one
+    // (Safari pauses audio for calls and other apps) resumes.
+    if (this.ctx && this.ctx.state !== 'closed' && this.requestedRate === rate && this.node && !restart) {
+      if (this.ctx.state !== 'running') await this.ctx.resume();
+      return this.ctx;
+    }
+    if (this.contextPromise) {
+      await this.contextPromise;
+      if (this.requestedRate === rate) return this.ctx;
+    }
+    this.contextPromise = this.#create(rate);
+    try {
+      return await this.contextPromise;
+    } finally {
+      this.contextPromise = null;
+    }
+  }
+
+  async #create(rate) {
+    if (this.dspInit && !this.dspInit.ready) this.dspInit.reject(new DOMException('Audio context replaced', 'AbortError'));
+    this.stop();
+    // An open input (input metering) moves to the new context.
+    const input = this.input ? { deviceId: this.input.deviceId } : null;
+    const inputRequest = this.inputRequest;
+    if (this.ctx) {
+      this.#releaseInput();
+      try {
+        await this.ctx.close();
+      } catch {
+        // Already closed.
+      }
+    }
+    let ctx;
+    try {
+      ctx = new AudioContext({ sampleRate: rate, latencyHint: latencySeconds(this.latencyHint, rate) });
+    } catch {
+      // Some browsers limit the rates a context can run at (Firefox: 8 to 192
+      // kHz). Recording and metering still work at the device rate (takes are
+      // resampled), but play() refuses: the mixer has no rate conversion, so
+      // the audio would play at the wrong speed and pitch.
+      ctx = new AudioContext({ latencyHint: latencySeconds(this.latencyHint, rate) });
+    }
+    this.ctx = ctx;
+    this.requestedRate = rate;
+    this.hintChanged = false;
+    this.rate = ctx.sampleRate;
+    await ctx.audioWorklet.addModule(mixerUrl);
+    const node = new AudioWorkletNode(ctx, 'audio-studio-mixer', {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
+    node.port.onmessage = (e) => { if (this.node === node) this.#onMessage(e.data); };
+    node.onprocessorerror = (e) => {
+      if (this.node !== node) return;
+      console.warn('[engine] processor error', e);
+      this.dspInit?.reject(new Error('Audio processor failed'));
+      this.stop();
+      this.node = null; // A failed worklet is permanently silent; recreate it on retry.
+      this.emit('engine-error', 'The audio processor failed. Try Play again to retry.');
+    };
+    this.node = node;
+    this.outputRoute = null;
+    this.#routeOutput();
+    if (this.sinkId) await this.#applySink();
+    // The worklet compiles the DSP from its bytes (a compiled module posted to
+    // an AudioWorklet fails to arrive in Chrome, which left every effect out).
+    this.#prepareDsp(node);
+    this.sent.clear();
+    node.port.postMessage({ type: 'graph', graph: this.graph });
+    if (this.tapUsers) node.port.postMessage({ type: 'tap', on: true });
+    if (ctx.state === 'suspended') await ctx.resume();
+    this.emit('context', ctx);
+    if (input && inputRequest === this.inputRequest) {
+      try {
+        await this.#openInput(input, inputRequest);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.warn('[engine] input', err);
+          this.emit('engine-error', 'The input stopped and could not be reopened.');
+        }
+      }
+    }
+    return ctx;
+  }
+
+  /** Download and compile effects once per worklet; failed attempts can retry. */
+  #prepareDsp(node) {
+    if (this.dspInit?.node === node && !this.dspInit.error) return this.dspInit;
+    const refresh = Boolean(this.dspInit?.error && this.dspInit.error.name !== 'AbortError');
+    const init = { node, id: ++this.dspRequest, ready: false, error: null };
+    init.promise = new Promise((resolve, reject) => {
+      init.resolve = resolve;
+      init.reject = (err) => { init.error = err; init.ready = false; reject(err); };
+    });
+    // Plain playback and input metering do not need DSP, but still start the
+    // download. Effect playback explicitly awaits this same promise.
+    init.promise.catch(() => {});
+    this.dspInit = init;
+    dspBytes({ refresh }).then((bytes) => {
+      if (this.node !== node || this.dspInit !== init) throw new DOMException('Audio context replaced', 'AbortError');
+      node.port.postMessage({ type: 'init', bytes, request: init.id });
+    }).catch(init.reject);
+    return init;
+  }
+
+  /** Chooses the device that plays output ('' = system default). Needs AudioContext.setSinkId. */
+  async setSink(id = '') {
+    this.sinkId = id || '';
+    if (this.ctx) await this.#applySink();
+  }
+
+  async #applySink() {
+    if (typeof this.ctx?.setSinkId !== 'function') return;
+    try {
+      await this.ctx.setSinkId(this.sinkId);
+    } catch (err) {
+      console.warn('[engine] output device', err);
+      this.emit('engine-error', 'The chosen output device is not available; playing through the system default.');
+    }
+  }
+
+  /** Latency for the next audio context: 'interactive' | 'balanced' | 'playback', or a buffer size in samples. */
+  setLatencyHint(hint) {
+    if (hint === this.latencyHint) return;
+    this.latencyHint = hint;
+    // Recreated on the next ensure() while stopped, so playback is not cut.
+    if (this.ctx) this.hintChanged = true;
+  }
+
+  /** Maps the two mix channels onto device outputs, e.g. [1, 0] swaps left and right. */
+  setOutputMap(map) {
+    this.outputMap = cleanMap(map);
+    if (this.node) this.#routeOutput();
+  }
+
+  /** Maps device input channels onto the two recorded channels (applies when an input next opens). */
+  setInputMap(map) {
+    this.inputMap = cleanMap(map);
+  }
+
+  #routeOutput() {
+    const { ctx, node } = this;
+    node.disconnect();
+    for (const n of this.outputRoute || []) n.disconnect();
+    this.outputRoute = null;
+    const map = this.outputMap;
+    if (map[0] === 0 && map[1] === 1) {
+      ctx.destination.channelCount = 2;
+      node.connect(ctx.destination);
+      return;
+    }
+    const max = Math.max(2, ctx.destination.maxChannelCount || 2);
+    const outs = Math.min(max, Math.max(2, ...map.map((c) => c + 1)));
+    try {
+      ctx.destination.channelCount = outs;
+      ctx.destination.channelCountMode = 'explicit';
+      ctx.destination.channelInterpretation = 'discrete';
+    } catch {
+      // Fixed channel count: map within it.
+    }
+    const split = ctx.createChannelSplitter(2);
+    const merge = ctx.createChannelMerger(outs);
+    node.connect(split);
+    map.forEach((dev, ch) => {
+      if (dev >= 0 && dev < outs) split.connect(merge, ch, dev);
+    });
+    merge.connect(ctx.destination);
+    this.outputRoute = [split, merge];
+  }
+
+  #onMessage(m) {
+    const init = this.dspInit;
+    if (init && m.request === init.id) {
+      if (m.type === 'dsp-ready') {
+        init.ready = true;
+        init.resolve();
+        return;
+      }
+      if (m.type === 'error') init.reject(new Error(m.message));
+    }
+    if (m.seq !== undefined && m.seq !== this.seq) {
+      // Sent before the latest play, seek or loop jump: out of date.
+      if (m.type === 'pos' || m.type === 'meters' || m.type === 'ended') return;
+    }
+    if ((m.type === 'pos' || m.type === 'meters') && this.state === 'playing') {
+      this.reports.push({ frame: m.frame, time: m.time });
+      if (this.reports.length > 256) this.reports.shift();
+    }
+    if (m.type === 'meters') {
+      this.meters.master = m.master;
+      for (const [id, l, r] of m.tracks) this.meters.tracks.set(id, [l, r]);
+      this.emit('meters', this.meters);
+    } else if (m.type === 'ended') {
+      this.lastPos = { frame: m.frame, time: this.ctx.currentTime };
+      this.reports = [];
+      this.#setState('stopped');
+      this.emit('ended', m.frame);
+    } else if (m.type === 'tap') {
+      this.emit('tap', m);
+    } else if (m.type === 'readouts') {
+      // Live readings of effects that measure (slot key -> Float32Array).
+      this.emit('fx-readout', new Map(m.list), m.frame);
+    } else if (m.type === 'underrun') {
+      // Audio the mixer needed had not arrived yet: a dropout (Events panel, status bar).
+      this.#feed();
+      this.emit('underrun', { key: m.key, frame: m.frame });
+    } else if (m.type === 'error') {
+      console.warn('[engine]', m.message);
+      this.emit('engine-error', m.message);
+    }
+  }
+
+  #setState(state) {
+    if (this.state === state) return;
+    this.state = state;
+    if (state === 'playing') {
+      clearInterval(this.timer);
+      this.timer = setInterval(() => this.#feed(), 100);
+    } else {
+      clearInterval(this.timer);
+      this.timer = 0;
+    }
+    this.emit('state', state);
+  }
+
+  get playing() {
+    return this.state === 'playing';
+  }
+
+  /**
+   * Current playhead in graph frames: the frame being heard, interpolated
+   * from the worklet's latest report rendered at least the output latency
+   * ago. Until the audio from a play, seek or loop jump point is heard, the
+   * playhead holds there (rather than showing earlier frames), and a loop
+   * wrap shows once its audio is heard rather than one latency early.
+   */
+  get position() {
+    if (!this.ctx || this.state !== 'playing') return this.lastPos.frame;
+    const heard = this.#heardTime();
+    const reports = this.reports;
+    let n = 0;
+    while (n < reports.length && reports[n].time <= heard) n++;
+    if (n) this.lastPos = reports.splice(0, n).pop();
+    if (heard <= this.lastPos.time) return this.lastPos.frame;
+    let f = this.lastPos.frame + (heard - this.lastPos.time) * this.rate;
+    const loop = this.range.loop;
+    if (loop && loop.end > loop.start && f >= loop.end) f = loop.start + ((f - loop.start) % (loop.end - loop.start));
+    if (!loop && this.range.to != null) f = Math.min(f, this.range.to);
+    return Math.max(0, f);
+  }
+
+  /**
+   * Context time of the audio leaving the speakers now. The output timestamp
+   * carried forward on the performance clock moves smoothly; currentTime moves
+   * in steps of the device buffer, which made the playhead stutter (some
+   * frames about 30% too far, others not at all).
+   */
+  #heardTime() {
+    const ctx = this.ctx;
+    const ts = ctx.getOutputTimestamp?.();
+    if (ts && ts.contextTime > 0 && ts.performanceTime > 0) {
+      const t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      // Never past what the mixer has rendered (a suspended context stops its clock).
+      if (Number.isFinite(t)) return Math.min(t, ctx.currentTime);
+    }
+    return ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
+  }
+
+  /**
+   * Replaces the mix graph. `sources` maps each clip.source key to its
+   * Channel[]; chunks already sent for unchanged keys are reused.
+   */
+  setGraph(graph, sources) {
+    if (this.playing && needsEffects(graph) && !this.dspInit?.ready) {
+      this.stop();
+      this.emit('engine-error', 'Playback stopped because effects are not ready. Try Play again to load them.');
+    }
+    // The context runs at one rate and the mixer does not convert: audio at
+    // another rate (Convert Sample Type during playback, or undoing it) would
+    // play at the wrong speed and pitch, so playback stops.
+    if (this.playing && graph.rate && this.ctx && graph.rate !== this.ctx.sampleRate) this.stop();
+    // Playing to the end of the content follows edits that move the end
+    // (pasting during playback plays the new audio too; deleting stops sooner).
+    if (this.playing && this.toEnd) {
+      const to = graphLength(graph);
+      if (to !== this.range.to) {
+        this.range.to = to;
+        this.node?.port.postMessage({ type: 'range', to });
+      }
+    }
+    this.graph = graph;
+    this.sources = sources;
+    // The mixer can render between any two messages: the audio the new graph
+    // plays goes before it, and what only the old graph played is dropped
+    // after it, so an edit during playback never renders a block of silence.
+    if (this.playing) this.#feed(this.position, false);
+    this.node?.port.postMessage({ type: 'graph', graph });
+    for (const key of [...this.sent.keys()]) {
+      if (!sources.has(key)) {
+        this.sent.delete(key);
+        this.node?.port.postMessage({ type: 'drop', key });
+      }
+    }
+    if (this.playing) this.#feed();
+  }
+
+  /**
+   * Starts playback at `from`. `to` stops there (null plays to the end of the
+   * graph); `loop` = { start, end } repeats that range. An optional signal
+   * cancels startup while the audio context is being initialized or resumed.
+   */
+  async play({ from = 0, to = null, loop = null, signal } = {}) {
+    if (signal?.aborted) return;
+    from = wholeFrame(from);
+    if (to != null) to = wholeFrame(to);
+    loop = wholeLoop(loop);
+    const rate = this.graph.rate || this.rate;
+    const previousNode = this.node;
+    await this.ensure(rate);
+    if (signal?.aborted) return;
+    if (this.ctx.sampleRate !== rate) throw new UserError(`This browser can't play ${rate} Hz audio. Convert its sample rate (Edit > Convert Sample Type) to play it.`);
+    if (needsEffects(this.graph)) {
+      const init = this.node !== previousNode ? this.dspInit : this.#prepareDsp(this.node);
+      try {
+        await init.promise;
+      } catch {
+        if (signal?.aborted) return;
+        throw new UserError('Effects could not be loaded. Try Play again to retry.');
+      }
+      if (signal?.aborted) return;
+    }
+    this.range = { from, to, loop };
+    this.toEnd = to != null && to === graphLength(this.graph);
+    this.#jumped(from);
+    this.#feed(from);
+    this.node.port.postMessage({ type: 'play', from, to, loop, seq: this.seq });
+    this.#setState('playing');
+  }
+
+  /**
+   * Asks the mixer to post its latest output ('tap' events: { L, R, frame,
+   * rate }, about 20 per second while playing). Reference counted: call
+   * tap(true) when an analysis view needs it and tap(false) when it stops.
+   */
+  tap(on) {
+    this.tapUsers = Math.max(0, (this.tapUsers || 0) + (on ? 1 : -1));
+    this.node?.port.postMessage({ type: 'tap', on: this.tapUsers > 0 });
+  }
+
+  setLoop(loop) {
+    loop = wholeLoop(loop);
+    // Past the new loop's end the mixer jumps to its start on the next block:
+    // the interpolated playhead follows rather than wrapping from the old position.
+    const latest = this.reports.length ? this.reports[this.reports.length - 1] : this.lastPos;
+    const jump = this.playing && loop && loop.end > loop.start && latest.frame >= loop.end;
+    if (jump) this.#jumped(loop.start);
+    // Turned off past where playback was to stop (the loop followed a new
+    // selection there): play on to the end rather than stopping on the spot.
+    if (this.playing && !loop && this.range.loop && this.range.to != null && latest.frame >= this.range.to) {
+      this.range.to = graphLength(this.graph);
+      this.toEnd = true;
+      this.node?.port.postMessage({ type: 'range', to: this.range.to });
+    }
+    this.range.loop = loop;
+    this.node?.port.postMessage(jump ? { type: 'loop', loop, seq: this.seq } : { type: 'loop', loop });
+    if (this.playing) this.#feed();
+  }
+
+  stop() {
+    if (!this.node) return this.lastPos.frame;
+    const at = this.position;
+    this.node.port.postMessage({ type: 'stop' });
+    this.lastPos = { frame: at, time: this.ctx?.currentTime ?? 0 };
+    this.reports = [];
+    this.#setState('stopped');
+    return at;
+  }
+
+  /** Moves the playhead while playing (seamless jump). */
+  seek(frame) {
+    // The mixer reads chunks by whole frame index: a fractional playhead (for
+    // example the interpolated `position`) would read undefined samples as NaN.
+    frame = wholeFrame(frame);
+    this.#jumped(frame);
+    if (!this.node) return;
+    this.#feed(frame);
+    this.node.port.postMessage({ type: 'seek', frame, seq: this.seq });
+  }
+
+  /** The playhead jumps to `frame` now; reports from before the jump no longer count. */
+  #jumped(frame) {
+    this.seq++;
+    this.lastPos = { frame, time: this.ctx?.currentTime ?? 0 };
+    this.reports = [];
+  }
+
+  #feed(at = this.position, drop = true) {
+    if (!this.node) return;
+    const rate = this.graph.rate || this.rate;
+    const windows = [[at - KEEP_BEHIND_S * rate, at + LOOKAHEAD_S * rate]];
+    const loop = this.range.loop;
+    if (loop && loop.end > loop.start) windows.push([loop.start, loop.start + LOOKAHEAD_S * rate]);
+    const need = new Map();
+    for (const track of this.graph.tracks) {
+      for (const clip of track.clips) {
+        if (clip.mute) continue;
+        for (const [ws, we] of windows) {
+          const a = Math.max(ws, clip.start);
+          const b = Math.min(we, clip.start + clip.length);
+          if (b <= a) continue;
+          const s0 = clip.offset + (a - clip.start);
+          const s1 = clip.offset + (b - clip.start);
+          let set = need.get(clip.source);
+          if (!set) need.set(clip.source, (set = new Set()));
+          for (let i = Math.floor(s0 / CHUNK); i <= Math.floor((s1 - 1) / CHUNK); i++) set.add(i);
+        }
+      }
+    }
+    const port = this.node.port;
+    for (const [key, indices] of need) {
+      const channels = this.sources.get(key);
+      if (!channels) continue;
+      let sent = this.sent.get(key);
+      if (!sent) this.sent.set(key, (sent = new Set()));
+      for (const index of indices) {
+        if (sent.has(index)) continue;
+        const start = index * CHUNK;
+        const len = Math.max(0, Math.min(CHUNK, channels[0].length - start));
+        if (!len) continue;
+        const data = channels.map((c) => c.toArray(start, start + len));
+        port.postMessage({ type: 'chunk', key, index, channels: data }, data.map((d) => d.buffer));
+        sent.add(index);
+      }
+    }
+    if (!drop) return;
+    for (const [key, sent] of this.sent) {
+      const keep = need.get(key);
+      for (const index of [...sent]) {
+        if (keep && keep.has(index)) continue;
+        port.postMessage({ type: 'drop', key, index });
+        sent.delete(index);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- recording
+
+  /** Opens an input device for metering and recording. */
+  async openInput({ deviceId } = {}) {
+    const request = ++this.inputRequest;
+    await this.ensure(this.graph.rate || this.rate);
+    if (request !== this.inputRequest) throw new DOMException('Input request cancelled', 'AbortError');
+    return this.#openInput({ deviceId }, request);
+  }
+
+  async #openInput({ deviceId }, request) {
+    this.#releaseInput();
+    const ctx = this.ctx;
+    const checkCurrent = () => {
+      if (request !== this.inputRequest || ctx !== this.ctx || ctx.state === 'closed') throw new DOMException('Input request cancelled', 'AbortError');
+    };
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: { ideal: 2 },
+      },
+    }).catch((err) => {
+      checkCurrent();
+      throw err;
+    });
+    let src;
+    let node;
+    const route = [];
+    try {
+      checkCurrent();
+      await ctx.audioWorklet.addModule(captureUrl);
+      checkCurrent();
+      src = ctx.createMediaStreamSource(stream);
+      node = new AudioWorkletNode(ctx, 'audio-studio-capture', { numberOfOutputs: 0 });
+      const deviceChannels = stream.getAudioTracks()[0]?.getSettings().channelCount || 1;
+      const map = this.inputMap;
+      if (!(map[0] === 0 && map[1] === 1)) {
+        // Pick device channels for the recorded left and right channels.
+        const n = Math.max(deviceChannels, ...map.map((c) => c + 1));
+        const split = ctx.createChannelSplitter(n);
+        route.push(split);
+        const merge = ctx.createChannelMerger(2);
+        route.push(merge);
+        src.connect(split);
+        map.forEach((dev, ch) => {
+          if (dev >= 0 && dev < n) split.connect(merge, dev, ch);
+        });
+        merge.connect(node);
+      } else src.connect(node);
+      node.port.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === 'data') this.emit('record-data', m.channels);
+        else if (m.type === 'meter') this.emit('input-meter', m.peak);
+      };
+      this.input = { deviceId, stream, src, node, route, channels: route.length ? 2 : deviceChannels };
+      return this.input;
+    } catch (err) {
+      // Permission may already be granted even though loading or connecting the
+      // capture processor failed. Release every resource acquired so far.
+      try { node?.port.postMessage({ type: 'close' }); } catch { /* Processor already gone. */ }
+      for (const n of [src, ...route]) {
+        try { n?.disconnect(); } catch { /* Already disconnected. */ }
+      }
+      for (const t of stream.getTracks()) t.stop();
+      checkCurrent();
+      throw err;
+    }
+  }
+
+  setRecording(on) {
+    this.input?.node.port.postMessage({ type: 'record', on });
+  }
+
+  closeInput() {
+    // Invalidate requests that are still waiting for permission or setup.
+    this.inputRequest++;
+    this.#releaseInput();
+  }
+
+  #releaseInput() {
+    if (!this.input) return;
+    // The processor sends what it still holds, then stops: one left running
+    // would cost render time for good (and a mapped one kept posting silent meters).
+    this.input.node.port.postMessage({ type: 'record', on: false });
+    this.input.node.port.postMessage({ type: 'close' });
+    this.input.src.disconnect();
+    for (const n of this.input.route) n.disconnect();
+    for (const t of this.input.stream.getTracks()) t.stop();
+    this.input = null;
+  }
+
+  /** Input latency (frames) the open input device reports (0 when unknown). */
+  get inputLatencyFrames() {
+    const settings = this.input?.stream?.getAudioTracks?.()[0]?.getSettings?.();
+    return Math.round((Number(settings?.latency) || 0) * this.rate);
+  }
+
+  /** Context time to wall-clock conversion for latency-compensated recording. */
+  get outputLatencyFrames() {
+    if (!this.ctx) return 0;
+    return Math.round(((this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0)) * this.rate);
+  }
+}
+
+export const engine = new Engine();

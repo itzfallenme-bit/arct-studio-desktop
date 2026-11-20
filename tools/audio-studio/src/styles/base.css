@@ -1,0 +1,1096 @@
+/* Reset, typography and shared controls. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* The hidden attribute always hides, whatever display a component's class sets. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--text);
+  font: var(--fs-md) / 1.35 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  touch-action: manipulation;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+svg.icon {
+  width: var(--icon-size, 16px);
+  height: var(--icon-size, 16px);
+  flex: none;
+  stroke-width: 1.75;
+  pointer-events: none;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Sliders: a rounded ring just outside the track, not a box over it. */
+input[type='range']:focus-visible {
+  border-radius: var(--radius);
+  outline-offset: 1px;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-hover);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control);
+  padding: 0 12px;
+  /* Rounded, outlined push buttons; the default action is filled with the accent. */
+  border: 1px solid var(--btn-border);
+  border-radius: calc(var(--control) / 2);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--btn-border-hover);
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-text);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
+  color: var(--accent-text);
+}
+
+.btn:focus-visible {
+  outline-offset: 1px;
+}
+
+/* A default button that is off reads as off in both themes: a quiet fill, not a faded accent. */
+.btn.primary:disabled {
+  border-color: var(--border-soft);
+  background: var(--bg-active);
+  color: var(--text-faint);
+  opacity: 1;
+}
+
+.btn.danger {
+  color: var(--danger);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex: none;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.icon-btn:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.icon-btn[aria-pressed='true'],
+.icon-btn.on {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.icon-btn.lg {
+  width: 28px;
+  height: 28px;
+  --icon-size: 18px;
+}
+
+/* ------------------------------------------------------------------- fields */
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row);
+}
+
+.field > label,
+.field > .label {
+  color: var(--text-dim);
+  flex: none;
+  min-width: 90px;
+}
+
+.input,
+.select {
+  height: var(--control);
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.input:focus,
+.select:focus {
+  border-color: var(--focus);
+  outline: none;
+}
+
+.input.num {
+  width: 72px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.select {
+  padding-right: 22px;
+  appearance: none;
+  /* A mid-grey chevron reads on both themes. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a8a' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-position: calc(100% - 7px) 50%;
+  background-size: 10px 6px;
+  background-repeat: no-repeat;
+}
+
+textarea.input {
+  height: auto;
+  padding: 6px;
+  resize: vertical;
+}
+
+/* Check boxes and radio buttons drawn in the theme: an input-colored box with an
+   outline, filled with the accent when on. */
+input[type='checkbox'],
+input[type='radio'] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--btn-border);
+  border-radius: 3px;
+  background: var(--bg-input);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+input[type='radio'] {
+  border-radius: 50%;
+}
+
+input[type='checkbox']:hover:not(:disabled),
+input[type='radio']:hover:not(:disabled) {
+  border-color: var(--btn-border-hover);
+}
+
+input[type='checkbox']:checked,
+input[type='checkbox']:indeterminate,
+input[type='radio']:checked {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+}
+
+input[type='checkbox']::before,
+input[type='radio']::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  transform: scale(0);
+  background: var(--accent-text);
+  transition: transform 80ms var(--ease);
+}
+
+input[type='checkbox']::before {
+  clip-path: polygon(14% 52%, 0% 66%, 38% 100%, 100% 26%, 86% 12%, 38% 72%);
+}
+
+input[type='checkbox']:indeterminate::before {
+  height: 2px;
+  clip-path: none;
+}
+
+input[type='radio']::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+input[type='checkbox']:checked::before,
+input[type='checkbox']:indeterminate::before,
+input[type='radio']:checked::before {
+  transform: scale(1);
+}
+
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  outline-offset: 1px;
+}
+
+@media (pointer: coarse) {
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 18px;
+    height: 18px;
+  }
+
+  input[type='checkbox']::before {
+    width: 12px;
+    height: 12px;
+  }
+
+  input[type='radio']::before {
+    width: 8px;
+    height: 8px;
+  }
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Scrubbable numeric value, drawn in the accent color like a link. Drag
+   horizontally to change it, click to type. */
+.hot {
+  display: inline-flex;
+  align-items: center;
+  min-width: 2.5em;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--hot);
+  font-variant-numeric: tabular-nums;
+  cursor: ew-resize;
+  white-space: nowrap;
+  user-select: none;
+  touch-action: none;
+}
+
+.hot:hover {
+  text-decoration: underline dotted;
+}
+
+.hot:focus-visible {
+  outline-offset: 1px;
+}
+
+.hot:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+input.hot-edit {
+  width: 6em;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid var(--focus);
+  border-radius: 2px;
+  background: var(--bg-input);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Range slider */
+input[type='range'].slider,
+input[type='range'].prefs-range,
+input[type='range'].media-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  min-width: 60px;
+}
+
+input[type='range'].slider::-webkit-slider-runnable-track,
+input[type='range'].prefs-range::-webkit-slider-runnable-track,
+input[type='range'].media-seek::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--divider);
+}
+
+input[type='range'].slider::-webkit-slider-thumb,
+input[type='range'].prefs-range::-webkit-slider-thumb,
+input[type='range'].media-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--text);
+}
+
+input[type='range'].slider::-moz-range-track,
+input[type='range'].prefs-range::-moz-range-track,
+input[type='range'].media-seek::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--divider);
+}
+
+input[type='range'].slider::-moz-range-thumb,
+input[type='range'].prefs-range::-moz-range-thumb,
+input[type='range'].media-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--text);
+}
+
+input[type='range'].slider:hover:not(:disabled)::-webkit-slider-thumb,
+input[type='range'].prefs-range:hover:not(:disabled)::-webkit-slider-thumb,
+input[type='range'].media-seek:hover:not(:disabled)::-webkit-slider-thumb {
+  background: var(--text-strong);
+}
+
+input[type='range']:disabled {
+  opacity: 0.45;
+}
+
+/* Number fields scrub like the hot values (controls.js installNumberScrub): no spin buttons,
+   the value in the accent color with a sideways cursor until the field is focused for typing. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type='number']:not(:focus):not(:disabled):not([readonly]) {
+  color: var(--hot);
+  cursor: ew-resize;
+}
+
+@media (pointer: coarse) {
+  input[type='number']:not(:focus) {
+    cursor: auto;
+  }
+}
+
+/* Knob control (canvas-free SVG) */
+.knob {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+  color: var(--text-dim);
+}
+
+.knob svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.knob:hover {
+  color: var(--text-strong);
+}
+
+/* -------------------------------------------------------------------- menus */
+
+.menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: min(420px, calc(100vw - 8px));
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 20px 1fr auto 16px;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 8px 0 4px;
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.menu-item:focus,
+.menu-item:hover {
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  outline: none;
+}
+
+.menu-item[aria-disabled='true'] {
+  color: var(--text-faint);
+}
+
+.menu-item[aria-disabled='true']:hover,
+.menu-item[aria-disabled='true']:focus {
+  background: var(--bg-hover);
+  color: var(--text-faint);
+}
+
+.menu-check {
+  display: flex;
+  justify-content: center;
+}
+
+.menu-shortcut {
+  padding-left: 24px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.menu-item:hover .menu-shortcut,
+.menu-item:focus .menu-shortcut {
+  color: inherit;
+}
+
+.menu-arrow {
+  display: flex;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--divider);
+}
+
+@media (pointer: coarse) {
+  .menu-item {
+    min-height: 36px;
+  }
+}
+
+/* ------------------------------------------------------------------ dialogs */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--overlay);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  max-width: min(640px, 100%);
+  max-height: min(86vh, calc(100dvh - 32px));
+  min-width: min(340px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: var(--shadow-dialog);
+}
+
+.dialog.wide {
+  max-width: min(880px, 100%);
+}
+
+/* A floating (modeless) window: the app behind it stays live. */
+.dialog-backdrop.modeless {
+  background: transparent;
+  pointer-events: none;
+}
+
+/* Floating windows share a stack with floating panel frames (src/ui/window-stack.js):
+   under modal dialogs, menus and tooltips, the one last clicked in front. */
+.dialog-backdrop.modeless {
+  z-index: 850;
+}
+
+.dialog.floating {
+  position: fixed;
+  pointer-events: auto;
+  box-shadow: var(--shadow-dialog);
+}
+
+/* However wide its content asks to be, a floating window fits the screen (tablets in portrait). */
+.dialog-backdrop.modeless > .dialog.floating {
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+}
+
+/* The window you are working in has the accent edge, like the focused panel frame. */
+.dialog.floating:focus-within {
+  border-color: var(--accent);
+}
+
+.dialog.floating:focus {
+  outline: none;
+}
+
+.dialog.floating .dialog-head {
+  cursor: move;
+  touch-action: none;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* The title bar moves the dialog (desktop layouts). */
+@media (min-width: 601px) {
+  .dialog-head {
+    cursor: move;
+    user-select: none;
+    /* A finger on the title bar moves the dialog instead of scrolling the page. */
+    touch-action: none;
+  }
+
+  .dialog-head .icon-btn {
+    cursor: pointer;
+  }
+}
+
+.dialog-title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.dialog-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.dialog-foot .spacer {
+  flex: 1;
+}
+
+@media (max-width: 600px) {
+  .dialog-backdrop {
+    padding: 0;
+    align-items: end;
+  }
+
+  .dialog,
+  .dialog.wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ------------------------------------------------------------------- toasts */
+
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+}
+
+.toast.error {
+  border-color: var(--danger);
+}
+
+.toast .btn {
+  height: 22px;
+}
+
+/* ----------------------------------------------------------------- tooltips */
+
+.tooltip {
+  position: fixed;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 8px));
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  pointer-events: none;
+  animation: tooltip-in 90ms var(--ease);
+}
+
+.tooltip-key {
+  flex: none;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--divider);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font: inherit;
+  text-align: center;
+}
+
+.tooltip-key[hidden] {
+  display: none;
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- utilities */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.muted {
+  color: var(--text-dim);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* In a short panel (phones) the message scrolls from its top instead of squeezing its buttons. */
+  justify-content: safe center;
+  gap: 8px;
+  height: 100%;
+  padding: 16px;
+  overflow: auto;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.empty-state > * {
+  flex-shrink: 0;
+}
+
+/* -------------------------------------------------------------- touch targets */
+/* On touch screens small controls keep their look but get a finger-sized hit area (at least
+   32 px) from an invisible box around them. Controls with their own ::after are left alone. */
+@media (pointer: coarse) {
+  .icon-btn.sm,
+  .hot,
+  .channel-btn,
+  .hud-knob,
+  .hud-pin,
+  .mx-gutter-btn,
+  .time-display {
+    position: relative;
+  }
+
+  .icon-btn.sm::after,
+  .hot::after,
+  .channel-btn::after,
+  .hud-knob::after,
+  .hud-pin::after,
+  .mx-gutter-btn::after,
+  .time-display::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+  }
+}
+
+/* ------------------------------------------------------------------ motion */
+/* Short, quiet entrances (90 to 160 ms) for things that appear; nothing moves on the way out.
+   Reduced motion turns them all off (below). */
+
+.menu {
+  animation: pop-in 90ms var(--ease);
+  transform-origin: top left;
+}
+
+.dialog-backdrop {
+  animation: fade-in 120ms var(--ease);
+}
+
+.dialog {
+  animation: dialog-in 160ms var(--ease);
+}
+
+.toast {
+  animation: rise-in 160ms var(--ease);
+}
+
+.panel-body.panel-enter {
+  animation: fade-in 110ms var(--ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (max-width: 600px) {
+  /* Bottom sheets slide up. */
+  .dialog {
+    animation-name: sheet-in;
+    animation-duration: 200ms;
+  }
+
+  @keyframes sheet-in {
+    from {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+  }
+}
+
+/* --------------------------------------------------------------- progress */
+/* Every progress bar (effects, exports, analysis, batch) shares one look: a rounded well with an
+   accent fill that moves smoothly, with a slow sheen while work runs. */
+
+.fx-progress,
+.io-progress-bar,
+.analysis-progress,
+.batch-progress {
+  border-radius: 999px;
+  background: var(--bg-well);
+  box-shadow: inset 0 0 0 1px var(--border-well);
+  overflow: hidden;
+}
+
+.fx-progress-fill,
+.io-progress-fill,
+.analysis-progress-bar,
+.batch-progress-bar {
+  border-radius: inherit;
+  background-color: var(--accent);
+  background-image: linear-gradient(90deg, transparent 0, rgba(255, 255, 255, 0.28) 50%, transparent 100%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  transition: width 160ms linear;
+  animation: progress-sheen 1.6s linear infinite;
+}
+
+@keyframes progress-sheen {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/* App busy (src/ui/busy.js): a thin moving line under the toolbar and a progress cursor. */
+:root[data-busy] .workspace {
+  position: relative;
+}
+
+:root[data-busy] .workspace::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 30% 100%;
+  animation: busy-line 1.2s var(--ease) infinite;
+  pointer-events: none;
+}
+
+:root[data-busy] body {
+  cursor: progress;
+}
+
+@keyframes busy-line {
+  from {
+    background-position: -30% 0;
+  }
+  to {
+    background-position: 130% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-busy] .workspace::before {
+    background: var(--accent);
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Forced colors (Windows High Contrast): backgrounds and bars that mark the
+   focused menu item, the current tab and pressed or selected items are
+   replaced by system colors, so those states are drawn with system colors. */
+@media (forced-colors: active) {
+  .menu-item:focus,
+  .menu-item:hover {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .menu-item[aria-disabled='true'],
+  .menu-item[aria-disabled='true'] .menu-shortcut {
+    color: GrayText;
+  }
+
+  .menu-item[aria-disabled='true']:hover,
+  .menu-item[aria-disabled='true']:focus {
+    background: Canvas;
+    color: GrayText;
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .panel-tab[aria-selected='true']::after {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .dock-drop.zone-tabs {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .tooltip {
+    border-color: CanvasText;
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: Canvas;
+  }
+
+  input[type='checkbox']:checked,
+  input[type='checkbox']:indeterminate,
+  input[type='radio']:checked {
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  input[type='checkbox']::before,
+  input[type='radio']::before {
+    background: HighlightText;
+  }
+
+  .workspace-tab[aria-selected='true'],
+  .prefs-tab[aria-selected='true'] {
+    text-decoration: underline 2px;
+    text-underline-offset: 4px;
+  }
+
+  .icon-btn[aria-pressed='true'],
+  .icon-btn.on,
+  .mode-btn.on,
+  [role='radio'][aria-checked='true'],
+  [role='option'][aria-selected='true'],
+  .data-table tbody tr[aria-selected='true'] {
+    forced-color-adjust: none;
+    background: SelectedItem;
+    color: SelectedItemText;
+  }
+}

@@ -1,0 +1,124 @@
+import { test, expect } from '@playwright/test';
+import { PDFDocument, PDFName } from 'pdf-lib';
+import { readFile } from 'node:fs/promises';
+import { protectPdf } from '../../src/core/security.js';
+
+const PUTER_MOCK = `window.puter = { env: 'web', auth: { isSignedIn: () => true, getUser: async () => ({username:'test-user'}), signIn: async () => {}, signOut: async () => {} }, fs: { readdir: async () => [], write: async () => ({}) }, ui: { onLaunchedWithItems: () => {}, onItemsOpened: () => {} } };`;
+const settled = (page) => expect(page.locator('.editor')).toHaveAttribute('aria-busy', 'false');
+
+test.skip(({ isMobile }) => isMobile, 'keyboard form filling');
+
+test('Tab goes on from the last field of a page to the fields of the next page', async ({
+  page,
+}) => {
+  await page.route('https://js.puter.com/**', (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: PUTER_MOCK }),
+  );
+  await page.goto('/#library');
+  const doc = await PDFDocument.create();
+  const form = doc.getForm();
+  // Fields on the first and third pages; none on the second or the last.
+  for (const [index, names] of [['A1', 'A2'], [], ['C1', 'C2'], []].entries()) {
+    const sheet = doc.addPage([500, 400]);
+    names.forEach((name, i) =>
+      form
+        .createTextField(name)
+        .addToPage(sheet, { x: 40, y: 300 - i * 60, width: 200, height: 24 }),
+    );
+    if (!names.length) sheet.drawText(`Page ${index + 1}`, { x: 40, y: 300, size: 14 });
+  }
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /Open a PDF/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'pages.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await doc.save()),
+  });
+  await settled(page);
+  const field = (name) => page.getByRole('textbox', { name: `${name} (on page)` });
+  await field('A1').fill('one');
+  await page.keyboard.press('Tab');
+  await expect(field('A2')).toBeFocused();
+  await page.keyboard.type('two');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.page-caption')).toHaveText('Page 3 of 4');
+  await expect(field('C1')).toBeFocused();
+  await page.keyboard.type('three');
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.locator('.page-caption')).toHaveText('Page 1 of 4');
+  await expect(field('A2')).toBeFocused();
+  await expect(field('A2')).toHaveValue('two');
+  // Past the form's last field, Tab leaves the page as usual.
+  await page.keyboard.press('Tab');
+  await expect(field('C1')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(field('C2')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.page-caption')).toHaveText('Page 3 of 4');
+  expect(await page.evaluate(() => !!document.activeElement.closest('.form-layer'))).toBe(false);
+  await settled(page);
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+  const saved = await PDFDocument.load(await readFile(await (await pending).path()));
+  const values = Object.fromEntries(
+    saved
+      .getForm()
+      .getFields()
+      .map((f) => [f.getName(), f.getText() ?? '']),
+  );
+  expect(values).toEqual({ A1: 'one', A2: 'two', C1: 'three', C2: '' });
+});
+
+for (const restricted of [false, true])
+  test(`Tab follows the order by rows or columns that a form from another tool sets${restricted ? ', when it may only be filled in' : ''}`, async ({
+    page,
+  }) => {
+    await page.route('https://js.puter.com/**', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: PUTER_MOCK }),
+    );
+    await page.goto('/#library');
+    const doc = await PDFDocument.create();
+    const form = doc.getForm();
+    // Two pages with a 2 × 2 grid of fields, listed bottom right first; the first page asks
+    // for rows (/Tabs /R), the second for columns (/C).
+    for (const [index, tabs] of ['R', 'C'].entries()) {
+      const sheet = doc.addPage([500, 400]);
+      for (const [name, x, y] of [
+        ['bottom right', 260, 100],
+        ['top right', 260, 300],
+        ['bottom left', 40, 100],
+        ['top left', 40, 300],
+      ])
+        form
+          .createTextField(`${name} ${index + 1}`)
+          .addToPage(sheet, { x, y, width: 180, height: 24 });
+      sheet.node.set(PDFName.of('Tabs'), PDFName.of(tabs));
+    }
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: /Open a PDF/ }).click();
+    await (
+      await chooser
+    ).setFiles({
+      name: 'tabs.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(
+        restricted
+          ? // Protected so that it can be filled in but not edited, as forms often are.
+            await protectPdf(await doc.save(), { permissions: 'owner', allow: { edit: false } })
+          : await doc.save(),
+      ),
+    });
+    await settled(page);
+    const field = (name) => page.getByRole('textbox', { name: `${name} (on page)` });
+    await field('top left 1').focus();
+    for (const name of ['top right 1', 'bottom left 1', 'bottom right 1', 'top left 2']) {
+      await page.keyboard.press('Tab');
+      await expect(field(name)).toBeFocused();
+    }
+    for (const name of ['bottom left 2', 'top right 2', 'bottom right 2']) {
+      await page.keyboard.press('Tab');
+      await expect(field(name)).toBeFocused();
+    }
+  });

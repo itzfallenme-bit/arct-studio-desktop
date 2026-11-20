@@ -1,0 +1,245 @@
+// Overview navigator: the whole timeline in miniature with the visible range
+// as a frame. Drag the frame to scroll, drag its edges to zoom, click outside
+// it to centre the view there, double-click to zoom out fully, scroll to zoom
+// around the pointer. Keyboard: Left/Right scroll, +/- zoom.
+//   host.timeline() -> { rate, length, view, cursor, selection }
+//   host.setView(start, end), host.overviewPeaks(columns) -> Float32Array(min,max pairs),
+//   or an array of them (one strip per channel), or null; optional host.viewMax(), the
+//   furthest frame the view can reach
+
+import { h } from '../lib/dom.js';
+import { cssVar } from '../ui/theme.js';
+
+/**
+ * The view zoomed by `factor` (< 1 zooms in) keeping frame `at` where it is on screen
+ * (inside the view; a point outside it zooms around the nearer edge), at least 16
+ * frames wide and no wider than `max`.
+ */
+export function overviewZoom(view, factor, at, max) {
+  const span = view.end - view.start;
+  const next = Math.max(16, Math.min(Math.max(16, max), span * factor));
+  const anchor = Math.max(view.start, Math.min(view.end, at));
+  const frac = span > 0 ? (anchor - view.start) / span : 0.5;
+  const start = anchor - frac * next;
+  return { start, end: start + next };
+}
+
+export class Overview {
+  constructor(app, host) {
+    this.app = app;
+    this.host = host;
+    this.canvas = h('canvas', { 'aria-hidden': 'true' });
+    this.frame = h('div.overview-frame', h('div.overview-grip.left'), h('div.overview-grip.right'));
+    this.playhead = h('div.overview-playhead', { 'aria-hidden': 'true' });
+    this.el = h(
+      'div.overview',
+      { role: 'scrollbar', tabindex: '0', 'aria-label': 'Zoom navigator', 'aria-orientation': 'horizontal' },
+      this.canvas,
+      this.playhead,
+      this.frame,
+    );
+    this.ctx = this.canvas.getContext('2d');
+    this.width = 0;
+    this.height = 0;
+    this.peaks = null;
+    // What the cached peaks were computed for: the host's content key (an
+    // object such as the document state, compared by identity), columns, total.
+    this.peaksFor = null;
+    this.el.addEventListener('pointerdown', (e) => this.#down(e));
+    this.el.addEventListener('dblclick', () => {
+      const t = this.host.timeline();
+      this.host.setView(0, Math.max(t.length, 1));
+    });
+    this.el.addEventListener('keydown', (e) => this.#keys(e));
+    // Wheel: zoom the view around the frame under the pointer; horizontal motion
+    // (or Shift) scrolls it.
+    this.el.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        const t = this.host.timeline();
+        const span = t.view.end - t.view.start;
+        const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
+        if (Math.abs(dx) > Math.abs(e.deltaY) || e.shiftKey) {
+          const shift = (dx / Math.max(1, this.width)) * this.#total(t);
+          this.host.setView(t.view.start + shift, t.view.end + shift);
+          return;
+        }
+        const next = overviewZoom(t.view, Math.pow(1.002, e.deltaY), this.#frame(e.clientX - this.el.getBoundingClientRect().left), this.host.viewMax?.() ?? Math.max(t.length, 1));
+        if (next.end - next.start !== span || next.start !== t.view.start) this.host.setView(next.start, next.end);
+      },
+      { passive: false },
+    );
+    // Hover feedback matching what a drag would do: resize at the frame edges,
+    // move inside it, jump elsewhere.
+    this.el.addEventListener('pointermove', (e) => {
+      if (e.buttons) return;
+      const x = e.clientX - this.el.getBoundingClientRect().left;
+      const mode = this.#hit(x, this.host.timeline());
+      this.el.style.cursor =
+        mode === 'left' || mode === 'right' ? 'ew-resize' : mode === 'move' ? 'grab' : 'pointer';
+    });
+  }
+
+  /**
+   * What a press at x grabs: the frame's 'left' or 'right' edge, the frame itself ('move'),
+   * or nothing. A frame too narrow for its edges to be told apart (a long file zoomed in)
+   * moves when grabbed as drawn; its edges are then just outside it.
+   */
+  #hit(x, t) {
+    const x0 = this.#x(t.view.start);
+    const x1 = this.#x(t.view.end);
+    if (x1 - x0 >= 18) {
+      if (Math.abs(x - x0) < 6) return 'left';
+      if (Math.abs(x - x1) < 6) return 'right';
+      return x > x0 && x < x1 ? 'move' : null;
+    }
+    const a = Math.max(0, x0);
+    const b = a + Math.max(6, Math.min(this.width, x1) - a);
+    if (x >= a - 3 && x <= b + 3) return 'move';
+    if (x >= a - 9 && x < a - 3) return 'left';
+    if (x > b + 3 && x <= b + 9) return 'right';
+    return null;
+  }
+
+  resize(w, hgt) {
+    const dpr = window.devicePixelRatio || 1;
+    this.width = w;
+    this.height = hgt;
+    this.canvas.width = Math.max(1, Math.round(w * dpr));
+    this.canvas.height = Math.max(1, Math.round(hgt * dpr));
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${hgt}px`;
+    this.dpr = dpr;
+    this.peaksFor = null;
+  }
+
+  #total() {
+    const t = this.host.timeline();
+    // A fixed scale where the host knows how far its view can reach, so a short file's
+    // overview does not stretch while zooming.
+    return Math.max(t.length, t.view.end, this.host.viewMax?.() || 0, 1);
+  }
+
+  #x(frame) {
+    return (frame / this.#total()) * this.width;
+  }
+
+  #frame(x) {
+    return (x / this.width) * this.#total();
+  }
+
+  #down(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    this.el.setPointerCapture(e.pointerId);
+    const t = this.host.timeline();
+    this.placePlayhead(t.cursor);
+    const x = e.offsetX;
+    let mode = this.#hit(x, t);
+    if (!mode) {
+      const span = t.view.end - t.view.start;
+      const c = this.#frame(x);
+      this.host.setView(c - span / 2, c + span / 2);
+      mode = 'move';
+    }
+    const start = { x, view: { ...this.host.timeline().view } };
+    const move = (ev) => {
+      const dx = this.#frame(ev.clientX - this.el.getBoundingClientRect().left) - this.#frame(start.x);
+      const v = start.view;
+      // Edge drags stop at the timeline's ends; otherwise the view would keep
+      // its span and the opposite edge would move instead.
+      if (mode === 'move') this.host.setView(v.start + dx, v.end + dx);
+      else if (mode === 'left') this.host.setView(Math.max(0, Math.min(v.start + dx, v.end - 16)), v.end);
+      else this.host.setView(v.start, Math.min(this.host.viewMax?.() ?? Infinity, Math.max(v.end + dx, v.start + 16)));
+    };
+    const up = () => {
+      this.el.removeEventListener('pointermove', move);
+      this.el.removeEventListener('pointerup', up);
+      this.el.removeEventListener('pointercancel', up);
+    };
+    this.el.addEventListener('pointermove', move);
+    this.el.addEventListener('pointerup', up);
+    this.el.addEventListener('pointercancel', up);
+  }
+
+  #keys(e) {
+    const t = this.host.timeline();
+    const span = t.view.end - t.view.start;
+    let handled = true;
+    if (e.key === 'ArrowLeft') this.host.setView(t.view.start - span / 4, t.view.end - span / 4);
+    else if (e.key === 'ArrowRight') this.host.setView(t.view.start + span / 4, t.view.end + span / 4);
+    else if (e.key === 'Home') this.host.setView(0, span);
+    else if (e.key === 'End') this.host.setView(t.length - span, t.length);
+    else if (e.key === '+' || e.key === '=') this.host.setView(t.view.start + span / 4, t.view.end - span / 4);
+    else if (e.key === '-') this.host.setView(t.view.start - span / 2, t.view.end + span / 2);
+    else handled = false;
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  /** Moves the playhead marker only (cheap; called every frame while playing). */
+  placePlayhead(frame) {
+    this.playhead.style.transform = `translateX(${Math.round(this.#x(frame))}px)`;
+  }
+
+  draw() {
+    const ctx = this.ctx;
+    const dpr = this.dpr || 1;
+    const W = this.width;
+    const H = this.height;
+    if (!W || !H) return;
+    const t = this.host.timeline();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const cols = this.canvas.width;
+    const content = this.host.peaksKey?.();
+    const total = this.#total();
+    const f = this.peaksFor;
+    if (!f || f.content !== content || f.cols !== cols || f.total !== total) {
+      this.peaks = this.host.overviewPeaks?.(cols, total) || null;
+      this.peaksFor = { content, cols, total };
+    }
+    if (this.peaks) {
+      // One strip per channel; inside the view frame in the full waveform color.
+      const strips = Array.isArray(this.peaks) ? this.peaks : [this.peaks];
+      const H = this.canvas.height;
+      const pad = 2 * dpr;
+      const lh = (H - pad * 2) / strips.length;
+      const fx0 = Math.max(0, Math.floor(this.#x(t.view.start) * dpr));
+      const fx1 = Math.min(cols, Math.ceil(this.#x(t.view.end) * dpr));
+      const dim = cssVar('--wave-dim');
+      const bright = cssVar('--wave');
+      strips.forEach((peaks, i) => {
+        const mid = pad + lh * (i + 0.5);
+        const half = lh / 2 - dpr * 0.5;
+        for (let c = 0; c < cols; c++) {
+          const lo = peaks[2 * c];
+          if (Number.isNaN(lo)) continue;
+          const hi = peaks[2 * c + 1];
+          const y0 = mid - Math.min(1, hi) * half;
+          const y1 = mid - Math.max(-1, lo) * half;
+          ctx.fillStyle = c >= fx0 && c < fx1 ? bright : dim;
+          ctx.fillRect(c, y0, 1, Math.max(1, y1 - y0));
+        }
+      });
+    }
+    const sel = t.selection;
+    if (sel && sel.end > sel.start) {
+      ctx.fillStyle = cssVar('--sel-bg');
+      const a = this.#x(sel.start) * dpr;
+      const b = this.#x(sel.end) * dpr;
+      ctx.fillRect(a, 0, Math.max(1, b - a), this.canvas.height);
+    }
+    this.placePlayhead(t.cursor);
+    const x0 = this.#x(t.view.start);
+    const x1 = this.#x(t.view.end);
+    this.frame.style.left = `${Math.max(0, x0)}px`;
+    this.frame.style.width = `${Math.max(6, Math.min(W, x1) - Math.max(0, x0))}px`;
+    this.el.setAttribute('aria-valuenow', String(Math.round((t.view.start / total) * 100)));
+    this.el.setAttribute('aria-valuemin', '0');
+    this.el.setAttribute('aria-valuemax', '100');
+  }
+}

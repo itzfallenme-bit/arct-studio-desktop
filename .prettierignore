@@ -1,9 +1,10 @@
 dist/
 node_modules/
+public/tools/
+ref/
+tools/
 src-tauri/target/
 src-tauri/Cargo.lock
+pnpm-lock.yaml
 *.json
 *.md
-.astro/
-utilities.css
-packages/player/src/services/tauri/bindings.ts

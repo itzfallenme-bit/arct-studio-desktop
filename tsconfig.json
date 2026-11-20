@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
+    "types": [
+      "vitest/globals",
+      "@testing-library/jest-dom",
+      "vite-plugin-svgr/client"
+    ],
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
@@ -18,40 +20,15 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "types": ["vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@nuclearplayer/ui": [
-        "./packages/ui/src"
-      ],
-      "@nuclearplayer/plugin-sdk": [
-        "./packages/plugin-sdk/src"
-      ],
-      "@nuclearplayer/tailwind-config": [
-        "./packages/tailwind-config/src"
-      ],
-      "@nuclearplayer/eslint-config": [
-        "./packages/eslint-config/src"
-      ],
-      "@nuclearplayer/themes": [
-        "./packages/themes/src"
-      ],
-      "@nuclearplayer/i18n": [
-        "./packages/i18n/src"
-      ]
+      "@nuclearplayer/ui": ["./packages/ui/src"],
+      "@nuclearplayer/model": ["./packages/model/src"],
+      "@nuclearplayer/tailwind-config": ["./packages/tailwind-config"],
+      "@nuclearplayer/eslint-config": ["./packages/eslint-config"],
+      "@nuclearplayer/i18n": ["./packages/i18n/src"]
     }
   },
-  "include": [
-    "packages/**/*.ts",
-    "packages/**/*.tsx",
-    "packages/**/*.d.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "**/dist",
-    "**/build"
-  ]
+  "include": ["src", "vite.config.ts", "vitest.config.ts"],
+  "exclude": ["src-tauri", "ref", "tools", "node_modules", "dist"]
 }

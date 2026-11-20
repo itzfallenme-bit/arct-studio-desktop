@@ -1,0 +1,66 @@
+// Registered texts (Text ▸ Register) run when a project is opened, if Preferences ▸ Save & Load ▸
+// Auto Run Scripts allows it.
+import { app, onAppReady } from '../app/app';
+import { prefs } from '../app/prefs';
+import { fileEvents } from '../io/files';
+import { runJavaScript, output } from '../scripting/runner';
+import { loadPython, runPythonText } from '../scripting/python';
+
+/** Whether a file name matches a pattern with * and ? wildcards (case-insensitive; a pattern without wildcards matches as a prefix). */
+export function globMatch(pattern: string, name: string): boolean {
+  if (!/[*?]/.test(pattern)) return name.toLowerCase().startsWith(pattern.toLowerCase());
+  const re = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+  return re.test(name);
+}
+
+/** Projects opened so far: a run waiting for the Python runtime is for the project open when it started. */
+let opened = 0;
+fileEvents.opened.push(() => void opened++);
+
+/**
+ * Why scripts that come with the project may not run (Preferences ▸ Save & Load ▸ Auto Run Scripts and its
+ * excluded paths), or null when they may. The one trust rule for project code: registered texts and line
+ * style modules alike.
+ */
+export function autoRunBlocked(): string | null {
+  const excluded = (prefs.autoexec_paths ?? []).find((pat) => pat.trim() && globMatch(pat.trim(), app.filename ?? ''));
+  if (excluded) return `"${app.filename}" matches the excluded path "${excluded}"`;
+  if (!prefs.use_scripts_auto_execute) return 'Auto Run Scripts is off (Preferences ▸ Save & Load)';
+  return null;
+}
+
+export async function runRegisteredTexts(): Promise<number> {
+  const project = opened;
+  const texts = Object.values(app.doc.texts ?? {}).filter((t) => t.use_module && t.language !== 'text');
+  if (!texts.length) return 0;
+  const blocked = autoRunBlocked();
+  if (blocked) {
+    app.report('WARNING', `${texts.length} registered script(s) not run: ${blocked}`);
+    return 0;
+  }
+  let n = 0;
+  for (const t of texts) {
+    try {
+      if (t.language === 'python') await loadPython();
+      // Another project was opened during the ~10 MB download: these texts are not its scripts (it runs its own).
+      if (opened !== project) return n;
+      const r = t.language === 'python' ? runPythonText(t.body, t.name, `Run ${t.name}`) : runJavaScript(t.body, t.name, `Run ${t.name}`);
+      if (!r.ok) {
+        output.push(`${t.name}: ${r.error}`, 'ERROR');
+        app.report('ERROR', `Registered script "${t.name}" failed: ${r.error}`);
+      } else n++;
+    } catch (e) {
+      app.report('ERROR', `Registered script "${t.name}" failed: ${(e as Error).message}`);
+    }
+  }
+  return n;
+}
+
+onAppReady(() => {
+  fileEvents.opened.push(() => void runRegisteredTexts());
+  // the project the session starts with (after a recovered session has loaded)
+  setTimeout(() => {
+    const ready = (window as unknown as { appReady?: Promise<void> }).appReady ?? Promise.resolve();
+    void ready.then(() => runRegisteredTexts());
+  }, 0);
+});

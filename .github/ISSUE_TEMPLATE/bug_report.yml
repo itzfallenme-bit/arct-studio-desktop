@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible problem with Arct Studio
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include API keys, tokens, or private documents. For security issues, use the private reporting link in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Arct Studio version
+      placeholder: '0.1.0'
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Browser development build
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: Affected tool
+      description: Leave blank if the problem is in the studio shell.
+      placeholder: Notes, Spreadsheet, 3D...
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Click...
+        3. See...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove secrets and private data before attaching.
+      render: shell

@@ -40,6 +40,7 @@ i18n.use(initReactI18next).init({
     'dashboard',
     'plugins',
     'streaming',
+    'studio',
   ],
   interpolation: {
     escapeValue: false,

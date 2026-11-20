@@ -1,0 +1,184 @@
+// This device's storage: a tiny promise wrapper over IndexedDB with one
+// interface shared by an in-memory version (tests, and browsers where
+// IndexedDB is blocked, such as some private windows).
+//
+//   const db = await openDB()            // IndexedDB, or memory when unavailable
+//   await db.get(store, key) / put(store, key, value) / delete(store, key)
+//   await db.put(store, key, value, { overwrite: false }) // atomic insert; false if occupied
+//   await db.all(store) -> [[key, value], ...]
+//   await db.batch([{ type: 'put' | 'add' | 'delete', store, key, value? }, ...]) // atomic; add rejects occupied keys
+//   await db.deleteIf(store, key, matches) // atomic conditional deletion
+//   db.persistent                        // false for the memory fallback
+//
+// Stores:
+//   projects     key -> { key, name, modified, size }        local project list
+//   projectData  key -> JSON string                          local project files
+//   samples      id  -> { id, name, type, size, data: ArrayBuffer, path }
+//                      imported audio bytes (path: its Puter copy, once uploaded)
+//   drafts       'tab:<slot>' -> { json, file, dirty, at }    autosaved session per tab
+//                (storage/tabs.js; 'session' is the shared key of older versions)
+
+export const DB_NAME = 'music-studio';
+export const DB_VERSION = 1;
+export const STORES = ['projects', 'projectData', 'samples', 'drafts'];
+
+const req = (r) =>
+  new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('Storage request failed.'));
+  });
+
+/** Opens the app database. Falls back to memory (with persistent=false) if IndexedDB fails. */
+export async function openDB(name = DB_NAME) {
+  const idb = globalThis.indexedDB;
+  if (!idb) return memoryDB();
+  try {
+    const open = idb.open(name, DB_VERSION);
+    open.onupgradeneeded = () => {
+      for (const s of STORES) if (!open.result.objectStoreNames.contains(s)) open.result.createObjectStore(s);
+    };
+    const db = await Promise.race([req(open), new Promise((_, reject) => setTimeout(() => reject(new Error('Storage timed out.')), 5000))]);
+    return wrap(db);
+  } catch (err) {
+    console.warn('Music Studio: browser storage is unavailable, using memory only.', err);
+    return memoryDB();
+  }
+}
+
+function wrap(db) {
+  const tx = (store, mode) => db.transaction(store, mode).objectStore(store);
+  const done = (t) =>
+    new Promise((resolve, reject) => {
+      t.oncomplete = () => resolve();
+      t.onerror = t.onabort = () => reject(t.error || new Error('Could not save to this device. The browser storage may be full.'));
+    });
+  return {
+    persistent: true,
+    get: (store, key) => req(tx(store, 'readonly').get(key)).then((v) => v ?? null),
+    async put(store, key, value, { overwrite = true } = {}) {
+      const s = tx(store, 'readwrite');
+      const completed = done(s.transaction);
+      let inserted = true;
+      try {
+        const request = overwrite ? s.put(value, key) : s.add(value, key);
+        if (!overwrite) request.onerror = (event) => {
+          if (request.error?.name !== 'ConstraintError') return;
+          // A duplicate is an ordinary allocation retry, not a failed transaction.
+          event.preventDefault();
+          event.stopPropagation();
+          inserted = false;
+        };
+      } catch (err) {
+        s.transaction.abort();
+        await completed.catch(() => {});
+        throw err;
+      }
+      await completed;
+      return inserted;
+    },
+    async delete(store, key) {
+      const s = tx(store, 'readwrite');
+      s.delete(key);
+      await done(s.transaction);
+    },
+    async deleteIf(store, key, matches) {
+      const s = tx(store, 'readwrite');
+      const completed = done(s.transaction);
+      let deleted = false;
+      let failure;
+      const read = s.get(key);
+      read.onsuccess = () => {
+        try {
+          if (read.result !== undefined && matches(read.result)) {
+            s.delete(key);
+            deleted = true;
+          }
+        } catch (err) {
+          failure = err;
+          s.transaction.abort();
+        }
+      };
+      await completed.catch((err) => { throw failure || err; });
+      return deleted;
+    },
+    async batch(operations) {
+      if (!operations.length) return;
+      const t = db.transaction([...new Set(operations.map((op) => op.store))], 'readwrite');
+      const completed = done(t);
+      let failure;
+      try {
+        for (const op of operations) {
+          const s = t.objectStore(op.store);
+          if (op.type === 'put') s.put(op.value, op.key);
+          else if (op.type === 'add') {
+            const request = s.add(op.value, op.key);
+            request.onerror = () => { failure ||= request.error; };
+          } else if (op.type === 'delete') s.delete(op.key);
+          else throw new TypeError(`Unknown storage operation: ${op.type}`);
+        }
+      } catch (err) {
+        // A synchronous request error does not automatically abort earlier writes.
+        t.abort();
+        await completed.catch(() => {});
+        throw err;
+      }
+      await completed.catch((err) => { throw failure || err; });
+    },
+    async all(store) {
+      const s = tx(store, 'readonly');
+      const [keys, values] = await Promise.all([req(s.getAllKeys()), req(s.getAll())]);
+      return keys.map((k, i) => [k, values[i]]);
+    },
+    close: () => db.close(),
+  };
+}
+
+/** Same interface, kept in memory (values are structured-cloned like IndexedDB does). */
+export function memoryDB() {
+  const stores = new Map(STORES.map((s) => [s, new Map()]));
+  const get = (s) => {
+    if (!stores.has(s)) stores.set(s, new Map());
+    return stores.get(s);
+  };
+  const clone = (v) => (v === null || v === undefined ? null : structuredClone(v));
+  return {
+    persistent: false,
+    stores,
+    get: async (store, key) => clone(get(store).get(key)),
+    async put(store, key, value, { overwrite = true } = {}) {
+      const values = get(store);
+      if (!overwrite && values.has(key)) return false;
+      values.set(key, clone(value));
+      return true;
+    },
+    delete: async (store, key) => void get(store).delete(key),
+    async deleteIf(store, key, matches) {
+      const values = get(store);
+      if (!values.has(key) || !matches(clone(values.get(key)))) return false;
+      return values.delete(key);
+    },
+    async batch(operations) {
+      // Validate and clone everything before changing any store.
+      const prepared = operations.map((op) => {
+        if (op.type !== 'put' && op.type !== 'add' && op.type !== 'delete') throw new TypeError(`Unknown storage operation: ${op.type}`);
+        return { ...op, value: op.type !== 'delete' ? clone(op.value) : null };
+      });
+      if (prepared.some((op) => op.type === 'add')) {
+        const occupied = new Map();
+        for (const op of prepared) {
+          if (!occupied.has(op.store)) occupied.set(op.store, new Map());
+          const keys = occupied.get(op.store);
+          const exists = keys.has(op.key) ? keys.get(op.key) : get(op.store).has(op.key);
+          if (op.type === 'add' && exists) throw new DOMException('That storage key is already in use.', 'ConstraintError');
+          keys.set(op.key, op.type !== 'delete');
+        }
+      }
+      for (const op of prepared) {
+        if (op.type !== 'delete') get(op.store).set(op.key, op.value);
+        else get(op.store).delete(op.key);
+      }
+    },
+    all: async (store) => [...get(store)].map(([k, v]) => [k, clone(v)]),
+    close() {},
+  };
+}
