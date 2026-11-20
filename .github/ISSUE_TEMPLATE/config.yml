@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security report
-    url: https://github.com/itzfallenme-bit/arct-studio/security/advisories/new
+    url: https://github.com/itzfallenme-bit/arct-studio-desktop/security/advisories/new
     about: Report vulnerabilities privately. Do not open a public issue.
   - name: Build and contribution guide
-    url: https://github.com/itzfallenme-bit/arct-studio/blob/master/CONTRIBUTING.md
+    url: https://github.com/itzfallenme-bit/arct-studio-desktop/blob/main/CONTRIBUTING.md
     about: Setup, checks, and pull request guidance.

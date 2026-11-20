@@ -35,7 +35,7 @@
     "shortDescription": "Every Arct tool in one desktop app",
     "longDescription": "Arct Studio brings 40 local-first tools together: writing, spreadsheets, design, media, business, and engineering in one desktop workspace.",
     "copyright": "Copyright 2026 Arct Development",
-    "homepage": "https://github.com/itzfallenme-bit/arct-studio",
+    "homepage": "https://github.com/itzfallenme-bit/arct-studio-desktop",
     "targets": "all",
     "icon": [
       "icons/32x32.png",

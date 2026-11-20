@@ -10,7 +10,7 @@ Do not open a public issue for a security problem.
 
 Use GitHub's private vulnerability reporting for this repository:
 
-https://github.com/itzfallenme-bit/arct-studio/security/advisories/new
+https://github.com/itzfallenme-bit/arct-studio-desktop/security/advisories/new
 
 Include:
 

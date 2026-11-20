@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Arct Studio - every Arct tool in one desktop app"
 authors = ["Arct Development"]
 license = "AGPL-3.0-only"
-repository = "https://github.com/itzfallenme-bit/arct-studio"
+repository = "https://github.com/itzfallenme-bit/arct-studio-desktop"
 edition = "2021"
 rust-version = "1.77"
 

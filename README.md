@@ -23,7 +23,7 @@ Some tools retain optional integrations from their upstream projects. Those inte
 
 ## Download
 
-Prebuilt installers are published on the [Releases page](https://github.com/itzfallenme-bit/arct-studio/releases). The build workflow produces Windows, macOS, and Linux bundles.
+Prebuilt installers are published on the [Releases page](https://github.com/itzfallenme-bit/arct-studio-desktop/releases). The build workflow produces Windows, macOS, and Linux bundles.
 
 ## Development
 

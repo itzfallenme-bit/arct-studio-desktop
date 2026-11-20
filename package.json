@@ -6,11 +6,11 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/itzfallenme-bit/arct-studio.git"
+    "url": "git+https://github.com/itzfallenme-bit/arct-studio-desktop.git"
   },
-  "homepage": "https://github.com/itzfallenme-bit/arct-studio#readme",
+  "homepage": "https://github.com/itzfallenme-bit/arct-studio-desktop#readme",
   "bugs": {
-    "url": "https://github.com/itzfallenme-bit/arct-studio/issues"
+    "url": "https://github.com/itzfallenme-bit/arct-studio-desktop/issues"
   },
   "engines": {
     "node": ">=22"
